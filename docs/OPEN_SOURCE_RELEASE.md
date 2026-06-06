@@ -13,6 +13,31 @@ Use a new public repository with a clean first commit.
 7. Enable GitHub Actions package publishing.
 8. Run the Docker publish workflow.
 
+## Sync Changes Through A Public PR
+
+From the private repository, use the sync helper to export the public tree and push it to a temporary branch in the public repository:
+
+```powershell
+.\scripts\sync-public.ps1
+```
+
+By default, the script:
+
+- exports `prepare-open-source-selfhost`;
+- updates the local public clone in `C:\tmp\spooly-public`;
+- creates a public branch named `sync/private-<date>-<sha>`;
+- scans for forbidden files and sensitive content;
+- pushes the branch to `SpoolyTracker/spoolytracker`;
+- prints the GitHub compare URL to open a PR.
+
+To create the PR automatically when GitHub CLI is installed:
+
+```powershell
+.\scripts\sync-public.ps1 -CreatePr
+```
+
+Never merge private branches directly into the public repository. Always use a clean export branch and review the public PR before merging.
+
 ## Public Scope
 
 Published:
