@@ -1,0 +1,52 @@
+import type { Dispatch, SetStateAction } from 'react';
+import type { FilamentOptionCategory } from '../../api';
+import type { ConditionalTemperatureRule } from '../../api';
+
+export interface FilamentFormData {
+    brandId: string | number;
+    materialId: string | number;
+    typeIds: number[];
+    color: string;
+    colors: string[];
+    colorName: string;
+    colorReferenceId?: number | null;
+    weightInitial: number | string;
+    weightRemaining: number | string;
+    weightUsed: number | string;
+    organizationId: string | number;
+    selectedOptions: number[];
+    purchaseDate: string;
+    price: number | string;
+    vendor: string;
+    isRefill: boolean;
+    spoolReference: string;
+    nozzleTempMin: number | string;
+    nozzleTempMax: number | string;
+    bedTempMin: number | string;
+    bedTempMax: number | string;
+    chamberTempMin: number | string;
+    chamberTempMax: number | string;
+    dryTemp: number | string;
+    dryTime: number | string;
+    printSpeedMin: number | string;
+    printSpeedMax: number | string;
+    retractionDistanceMm: number | string;
+    retractionSpeedMmS: number | string;
+    retractionZHopMm: number | string;
+    retractionNotes: string;
+    conditionalTemperatureRules: ConditionalTemperatureRule[];
+    kFactor: number | string;
+    densityGcm3: number | string;
+    diameterMm: number | string;
+    lowStockThreshold: number | string | null;
+    lowStockThresholdType: 'GRAMS' | 'PERCENTAGE';
+    nfcTagId?: string;
+    tigerBrandId?: number;
+    tigerMaterialId?: number;
+    tigerTypeId?: number;
+    quantity: number | string;
+}
+
+export type SetFilamentFormData = Dispatch<SetStateAction<FilamentFormData>>;
+export type WeightMode = 'remaining' | 'used';
+export type CustomOptionCategory = FilamentOptionCategory | string;

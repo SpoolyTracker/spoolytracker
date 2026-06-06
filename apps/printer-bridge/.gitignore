@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-headless
+dist-final
+release
+*.exe
+*.dmg
+*.AppImage
+.DS_Store
+thumbs.db
+downloads

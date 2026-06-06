@@ -1,0 +1,86 @@
+import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { Box, Button, Typography, Container, Grid, Paper } from '@mui/material';
+import { ArrowRight, Database, Smartphone, ShieldCheck } from 'lucide-react';
+import { useTheme } from '@mui/material/styles';
+
+export default function LandingPage() {
+    const { t } = useTranslation();
+    const theme = useTheme();
+    const isDark = theme.palette.mode === 'dark';
+
+    return (
+        <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+            {/* Navbar */}
+            <Box component="nav" sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: 1200, mx: 'auto', width: '100%' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <img src={isDark ? '/logo/logo-picto-dark.png' : '/logo/logo-picto-light.png'} alt='logo' style={{ width: 40, height: 40 }} />
+                    <Typography variant="h5" fontWeight="700" color="primary">
+                        SpoolyTracker
+                    </Typography>
+                </Box>
+                <Box>
+                    <Button component={Link} to="/login" variant="outlined" sx={{ mr: 1 }}>
+                        {t('login.signIn') || 'Sign In'}
+                    </Button>
+                    <Button component={Link} to="/signup" variant="contained">
+                        S'inscrire
+                    </Button>
+                </Box>
+            </Box>
+
+            {/* Hero Section */}
+            <Container maxWidth="lg" sx={{ flex: 1, display: 'flex', alignItems: 'center', my: 4 }}>
+                <Grid container spacing={4} alignItems="center">
+                    <Grid size={{ xs: 12, md: 6 }}>
+                        <Typography variant="h2" fontWeight="800" gutterBottom sx={{ background: 'linear-gradient(45deg, #2563eb 30%, #ec4899 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                            Master Your Filament Inventory
+                        </Typography>
+                        <Typography variant="h5" color="text.secondary" paragraph>
+                            The ultimate solution for 3D printing enthusiasts and professionals. Track consumption, manage spools, and sync across devices effortlessly.
+                        </Typography>
+                        <Box sx={{ mt: 4 }}>
+                            <Button component={Link} to="/signup" variant="contained" size="large" endIcon={<ArrowRight />} sx={{ py: 1.5, px: 4, borderRadius: 2 }}>
+                                Get Started Free
+                            </Button>
+                        </Box>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                        <Box component="img" src={isDark ? '/logo/logo-picto-dark.png' : '/logo/logo-picto-light.png'} alt="Hero" sx={{ width: '100%', maxWidth: 400, display: 'block', mx: 'auto', filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.1))' }} />
+                    </Grid>
+                </Grid>
+            </Container>
+
+            {/* Features */}
+            <Box sx={{ bgcolor: 'background.paper', py: 8 }}>
+                <Container maxWidth="lg">
+                    <Typography variant="h3" fontWeight="bold" textAlign="center" mb={6}>Why SpoolyTracker?</Typography>
+                    <Grid container spacing={4}>
+                        {[
+                            { icon: Database, title: 'Smart Inventory', desc: 'Track weight, color, and material type for every spool.' },
+                            { icon: Smartphone, title: 'Mobile Companion', desc: 'Scan NFC tags and update stock on the fly with our mobile app.' },
+                            { icon: ShieldCheck, title: 'Secure & Private', desc: 'Your data is encrypted and safe. Self-hostable compatible.' }
+                        ].map((feature, idx) => (
+                            <Grid size={{ xs: 12, md: 4 }} key={idx}>
+                                <Paper elevation={0} sx={{ p: 4, height: '100%', borderRadius: 4, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider' }}>
+                                    <Box sx={{ width: 48, height: 48, bgcolor: 'primary.light', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2, color: 'primary.main' }}>
+                                        <feature.icon />
+                                    </Box>
+                                    <Typography variant="h5" fontWeight="bold" gutterBottom>{feature.title}</Typography>
+                                    <Typography color="text.secondary">{feature.desc}</Typography>
+                                </Paper>
+                            </Grid>
+                        ))}
+                    </Grid>
+                </Container>
+            </Box>
+
+            {/* Footer */}
+            <Box component="footer" sx={{ p: 4, textAlign: 'center', borderTop: '1px solid', borderColor: 'divider' }}>
+                <Typography variant="body2" color="text.secondary">
+                    © {new Date().getFullYear()} SpoolyTracker. All rights reserved.
+                </Typography>
+            </Box>
+        </Box>
+    );
+}

@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-final
+release
+*.exe
+*.dmg
+*.AppImage
+.DS_Store
+thumbs.db

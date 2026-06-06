@@ -1,0 +1,707 @@
+import re
+from enum import StrEnum
+
+from pydantic import BaseModel, Field
+
+from src.agents.base import AgentResult, BaseAgent
+from src.tools.consumption import create_consumption_proposal
+from src.tools.models import (
+    ConsumptionProposalRequest,
+    ConsumptionProposalResponse,
+    LowStockRequest,
+    LowStockResponse,
+    ProjectEstimateRequest,
+    ProjectEstimateResponse,
+    ProjectItem,
+    ProjectRequirementEstimate,
+    ProposedAction,
+    StockItemRequest,
+    StockItem,
+    StockItemResponse,
+    StockSummaryResponse,
+)
+from src.tools.projects import estimate_project_materials
+from src.tools.stock import get_stock_item, get_stock_summary, list_low_stock_items
+
+
+class Intent(StrEnum):
+    STOCK_SUMMARY = "stock_summary"
+    LOW_STOCK = "low_stock"
+    CONSUMPTION_ENTRY = "consumption_entry"
+    PROJECT_QUESTION = "project_question"
+    GENERAL_QUESTION = "general_question"
+    PRO_FEATURE = "pro_feature"
+
+
+class IntentDetection(BaseModel):
+    intent: Intent
+    confidence: float = Field(ge=0, le=1)
+
+
+class FreeAssistantAgent(BaseAgent):
+    name = "free_assistant"
+    color_aliases = {
+        "black": {"black", "noir", "noire"},
+        "white": {"white", "blanc", "blanche"},
+        "red": {"red", "rouge"},
+        "blue": {"blue", "bleu", "bleue"},
+        "green": {"green", "vert", "verte"},
+        "yellow": {"yellow", "jaune"},
+        "orange": {"orange"},
+        "gray": {"gray", "grey", "gris", "grise"},
+        "silver": {"silver", "argent"},
+        "transparent": {"transparent", "translucide"},
+    }
+
+    async def run(self, prompt: str, context: dict | None = None) -> AgentResult:
+        context = context or {}
+        detection = self.detect_intent(prompt)
+
+        if detection.intent == Intent.PRO_FEATURE and context.get("plan") != "pro":
+            return self._answer_pro_restricted()
+
+        if detection.intent == Intent.LOW_STOCK:
+            return self._answer_low_stock(context)
+
+        if detection.intent == Intent.CONSUMPTION_ENTRY:
+            return self._answer_consumption(prompt, context)
+
+        if detection.intent == Intent.PROJECT_QUESTION:
+            return self._answer_project(prompt, context)
+
+        if detection.intent == Intent.STOCK_SUMMARY:
+            return self._answer_stock(prompt, context)
+
+        return self._answer_general(context)
+
+    def detect_intent(self, prompt: str) -> IntentDetection:
+        text = prompt.lower()
+
+        if self._has_any(
+            text,
+            [
+                "date de rupture",
+                "rupture estimee",
+                "rupture estimée",
+                "prevision",
+                "prévision",
+                "consommation moyenne",
+                "anormale",
+                "materiaux a risque",
+                "matériaux à risque",
+                "recommande un achat",
+                "recommander un achat",
+                "notification proactive",
+                "les indiquer",
+                "me les indiquer",
+                "detail",
+                "détail",
+            ],
+        ):
+            return IntentDetection(intent=Intent.PRO_FEATURE, confidence=0.92)
+
+        if self._has_any(
+            text,
+            [
+                "stock faible",
+                "stock bas",
+                "presque vide",
+                "rupture",
+                "manque",
+                "faible",
+                "bientot vide",
+                "bientôt vide",
+            ],
+        ):
+            return IntentDetection(intent=Intent.LOW_STOCK, confidence=0.95)
+
+        if self._has_any(
+            text,
+            [
+                "consomm",
+                "utilise",
+                "utilisé",
+                "retire",
+                "retiré",
+                "deduis",
+                "déduis",
+                "imprime",
+                "imprimé",
+                "saisir",
+                "saisie",
+            ],
+        ):
+            return IntentDetection(intent=Intent.CONSUMPTION_ENTRY, confidence=0.9)
+
+        if self._has_any(text, ["projet", "faisable", "materiaux", "matériaux", "besoin"]):
+            return IntentDetection(intent=Intent.PROJECT_QUESTION, confidence=0.88)
+
+        if self._has_any(text, ["stock", "inventaire", "bobine", "filament", "reste"]):
+            return IntentDetection(intent=Intent.STOCK_SUMMARY, confidence=0.84)
+
+        return IntentDetection(intent=Intent.GENERAL_QUESTION, confidence=0.45)
+
+    def _answer_pro_restricted(self) -> AgentResult:
+        return AgentResult(
+            intent=Intent.PRO_FEATURE,
+            answer=(
+                "Cette demande correspond a une fonctionnalite Pro. "
+                "En mode Free, je peux seulement repondre sur le stock actuel, le stock faible, "
+                "preparer une saisie de consommation et estimer simplement un projet."
+            ),
+            data={"required_plan": "pro", "current_plan": "free"},
+        )
+
+    def _answer_stock(self, prompt: str, context: dict) -> AgentResult:
+        item_query = self._extract_stock_query(prompt)
+        if item_query:
+            item_response = self._get_stock_item(StockItemRequest(query=item_query), context)
+            if item_response.item:
+                item = item_response.item
+                memory_note = self._memory_note(context)
+                item_label = self._display_stock_item(item)
+                return AgentResult(
+                    intent=Intent.STOCK_SUMMARY,
+                    answer=(
+                        f"La bobine {item_label} contient {item.weight_remaining_g:g}g restants "
+                        f"sur {item.weight_initial_g:g}g, soit environ {item.remaining_percent:g}%."
+                        f"{self._source_note(context)}"
+                        f"{memory_note}"
+                    ),
+                    data={
+                        "item": item.model_dump(),
+                        "source": context.get("data_source", "mock_fallback"),
+                        "memories": context.get("memories", []),
+                    },
+                )
+
+        summary = self._get_stock_summary(context)
+        memory_note = self._memory_note(context)
+        if self._wants_stock_breakdown(prompt):
+            answer, breakdown = self._format_stock_breakdown(summary)
+            return AgentResult(
+                intent=Intent.STOCK_SUMMARY,
+                answer=answer + self._source_note(context) + memory_note,
+                data={
+                    **summary.model_dump(),
+                    "breakdown": breakdown,
+                    "source": context.get("data_source", "mock_fallback"),
+                    "memories": context.get("memories", []),
+                },
+            )
+        return AgentResult(
+            intent=Intent.STOCK_SUMMARY,
+            answer=(
+                f"Votre inventaire contient {summary.active_items} bobines actives, "
+                f"pour un total de {summary.total_remaining_g:g}g disponibles."
+                f"{self._source_note(context)}"
+                f"{memory_note}"
+            ),
+            data={
+                **summary.model_dump(),
+                "source": context.get("data_source", "mock_fallback"),
+                "memories": context.get("memories", []),
+            },
+        )
+
+    def _wants_stock_breakdown(self, prompt: str) -> bool:
+        text = prompt.lower()
+        return self._has_any(
+            text,
+            [
+                "par matiere",
+                "par matière",
+                "par materiau",
+                "par matériau",
+                "par couleur",
+                "matiere et couleur",
+                "matière et couleur",
+                "couleur et matiere",
+                "couleur et matière",
+                "resume-moi mon stock",
+                "résume-moi mon stock",
+                "repartition",
+                "répartition",
+            ],
+        )
+
+    def _format_stock_breakdown(
+        self,
+        summary: StockSummaryResponse,
+    ) -> tuple[str, list[dict]]:
+        active_items = [item for item in summary.items if item.weight_remaining_g > 0]
+        material_groups: dict[str, dict] = {}
+        for item in active_items:
+            material = item.material or "Matiere inconnue"
+            color = self._normalize_display_color(item.color_name or item.color)
+            group = material_groups.setdefault(
+                material,
+                {"material": material, "count": 0, "weight": 0.0, "colors": {}},
+            )
+            group["count"] += 1
+            group["weight"] += item.weight_remaining_g
+            color_group = group["colors"].setdefault(
+                color,
+                {"color": color, "count": 0, "weight": 0.0},
+            )
+            color_group["count"] += 1
+            color_group["weight"] += item.weight_remaining_g
+
+        breakdown = []
+        lines = [
+            (
+                f"Votre stock actif contient {len(active_items)} bobine(s), "
+                f"pour un total de {summary.total_remaining_g:g}g disponibles."
+            ),
+            "",
+            "Repartition par matiere et couleur:",
+        ]
+        for group in sorted(material_groups.values(), key=lambda item: item["weight"], reverse=True):
+            colors = sorted(group["colors"].values(), key=lambda item: item["weight"], reverse=True)
+            breakdown.append(
+                {
+                    "material": group["material"],
+                    "count": group["count"],
+                    "weight": round(group["weight"], 2),
+                    "colors": [
+                        {
+                            "color": color_group["color"],
+                            "count": color_group["count"],
+                            "weight": round(color_group["weight"], 2),
+                        }
+                        for color_group in colors
+                    ],
+                }
+            )
+            lines.append(
+                f"- **{group['material']}**: {group['count']} bobine(s), {round(group['weight'])}g"
+            )
+            for color_group in colors:
+                lines.append(
+                    f"  - {color_group['color']}: {color_group['count']} bobine(s), {round(color_group['weight'])}g"
+                )
+            lines.append("")
+
+        return "\n".join(lines).rstrip(), breakdown
+
+    def _normalize_display_color(self, color: str | None) -> str:
+        if not color:
+            return "Couleur non renseignee"
+        cleaned = color.strip()
+        if cleaned in {"-", "_", "—", "–"}:
+            return "Couleur non renseignee"
+        return cleaned
+
+    def _answer_low_stock(self, context: dict) -> AgentResult:
+        low_stock = self._list_low_stock_items(LowStockRequest(threshold_percent=20), context)
+        if not low_stock.items:
+            return AgentResult(
+                intent=Intent.LOW_STOCK,
+                answer=(
+                    "Aucune bobine n'est sous le seuil de 20%."
+                    + self._source_note(context)
+                    + self._memory_note(context)
+                ),
+                data={
+                    **low_stock.model_dump(),
+                    "source": context.get("data_source", "mock_fallback"),
+                    "memories": context.get("memories", []),
+                },
+            )
+
+        lines = [
+            f"- {self._display_stock_item(item)}: {item.weight_remaining_g:g}g restants ({item.remaining_percent:g}%)"
+            for item in low_stock.items
+        ]
+        return AgentResult(
+            intent=Intent.LOW_STOCK,
+            answer="Voici les bobines en stock faible:\n"
+            + "\n".join(lines)
+            + self._source_note(context)
+            + self._memory_note(context),
+            data={
+                **low_stock.model_dump(),
+                "source": context.get("data_source", "mock_fallback"),
+                "memories": context.get("memories", []),
+            },
+        )
+
+    def _answer_consumption(self, prompt: str, context: dict | None = None) -> AgentResult:
+        context = context or {}
+        proposal = self._create_consumption_proposal(
+            ConsumptionProposalRequest(user_message=prompt),
+            context,
+        )
+        actions = [proposal.action.model_dump()] if proposal.action else []
+        actions.extend(action.model_dump() for action in proposal.extra_actions)
+        return AgentResult(
+            intent=Intent.CONSUMPTION_ENTRY,
+            answer=proposal.message,
+            requires_confirmation=proposal.action is not None,
+            proposed_actions=actions,
+            data=proposal.model_dump(),
+        )
+
+    def _answer_project(self, prompt: str, context: dict) -> AgentResult:
+        estimate = self._estimate_project_materials(ProjectEstimateRequest(query=prompt), context)
+        if estimate.project is None:
+            return AgentResult(
+                intent=Intent.PROJECT_QUESTION,
+                answer=(
+                    "Je n'ai pas trouve de projet correspondant."
+                    + self._source_note(context)
+                    + self._memory_note(context)
+                ),
+                data={
+                    **estimate.model_dump(),
+                    "source": context.get("data_source", "mock_fallback"),
+                    "memories": context.get("memories", []),
+                },
+            )
+
+        status = "faisable" if estimate.overall_status == "ok" else "a risque"
+        details = [
+            (
+                f"- {item.material} {item.color}: {item.required_g:g}g requis, "
+                f"{item.available_g:g}g disponibles ({item.status})"
+            )
+            for item in estimate.estimates
+        ]
+        return AgentResult(
+            intent=Intent.PROJECT_QUESTION,
+            answer=(
+                f"Pour le projet {estimate.project.name}, l'estimation est {status}.\n"
+                + "\n".join(details)
+                + self._source_note(context)
+                + self._memory_note(context)
+            ),
+            data={
+                **estimate.model_dump(),
+                "source": context.get("data_source", "mock_fallback"),
+                "memories": context.get("memories", []),
+            },
+        )
+
+    def _answer_general(self, context: dict) -> AgentResult:
+        return AgentResult(
+            intent=Intent.GENERAL_QUESTION,
+            answer=(
+                "Je suis l'assistant IA Free de Spooly. Je peux repondre sur le stock, "
+                "le stock faible, preparer une saisie de consommation et estimer les besoins "
+                "d'un projet avec les donnees disponibles."
+            )
+            + self._source_note(context)
+            + self._memory_note(context),
+            data={
+                "source": context.get("data_source", "mock_fallback"),
+                "memories": context.get("memories", []),
+            },
+        )
+
+    def _extract_stock_query(self, prompt: str) -> str | None:
+        text = prompt.lower()
+        candidates = [
+            "pla noir",
+            "pla blanc",
+            "petg rouge",
+            "petg blanc",
+            "bambulab",
+            "prusament",
+            "arianeplast",
+            "noir",
+            "rouge",
+            "blanc",
+        ]
+        for candidate in candidates:
+            if candidate in text:
+                return candidate
+        return None
+
+    def _has_any(self, text: str, needles: list[str]) -> bool:
+        return any(needle in text for needle in needles)
+
+    def _memory_note(self, context: dict) -> str:
+        memories = context.get("memories") or []
+        if not memories:
+            return ""
+
+        lines = [f"- {memory['content']}" for memory in memories[:3]]
+        return "\n\nMemoire pertinente utilisee:\n" + "\n".join(lines)
+
+    def _source_note(self, context: dict) -> str:
+        source = context.get("data_source")
+        if source == "main_api":
+            return "\n\nSource des donnees: API Spooly."
+        if source:
+            return "\n\nSource des donnees: mode demo/offline."
+        return ""
+
+    def _stock_items(self, context: dict) -> list[StockItem] | None:
+        items = context.get("stock_items")
+        return items if isinstance(items, list) else None
+
+    def _projects(self, context: dict) -> list[ProjectItem] | None:
+        projects = context.get("projects")
+        return projects if isinstance(projects, list) else None
+
+    def _get_stock_summary(self, context: dict) -> StockSummaryResponse:
+        items = self._stock_items(context)
+        if items is None:
+            return get_stock_summary()
+        return StockSummaryResponse(
+            active_items=len([item for item in items if item.weight_remaining_g > 0]),
+            total_remaining_g=round(sum(item.weight_remaining_g for item in items), 2),
+            total_initial_g=round(sum(item.weight_initial_g for item in items), 2),
+            items=items,
+        )
+
+    def _get_stock_item(self, request: StockItemRequest, context: dict) -> StockItemResponse:
+        items = self._stock_items(context)
+        if items is None:
+            return get_stock_item(request)
+        for item in items:
+            if self._matches_stock_item(item, request.query):
+                return StockItemResponse(item=item)
+        return StockItemResponse(item=None)
+
+    def _list_low_stock_items(self, request: LowStockRequest, context: dict) -> LowStockResponse:
+        items = self._stock_items(context)
+        if items is None:
+            return list_low_stock_items(request)
+        low_stock = [
+            item
+            for item in items
+            if item.weight_initial_g > 0
+            and item.weight_remaining_g / item.weight_initial_g * 100 <= request.threshold_percent
+        ]
+        return LowStockResponse(items=sorted(low_stock, key=lambda item: item.remaining_percent))
+
+    def _estimate_project_materials(
+        self,
+        request: ProjectEstimateRequest,
+        context: dict,
+    ) -> ProjectEstimateResponse:
+        projects = self._projects(context)
+        items = self._stock_items(context)
+        if projects is None or items is None:
+            return estimate_project_materials(request)
+
+        project = self._find_project(request.query, projects)
+        if project is None:
+            return ProjectEstimateResponse(project=None, estimates=[], overall_status="unknown")
+
+        estimates: list[ProjectRequirementEstimate] = []
+        for requirement in project.requirements:
+            available_g = sum(
+                item.weight_remaining_g
+                for item in items
+                if item.material.lower() == requirement.material.lower()
+                and item.color.lower() == requirement.color.lower()
+            )
+            status = "ok" if available_g >= requirement.required_g else "insufficient"
+            estimates.append(
+                ProjectRequirementEstimate(
+                    material=requirement.material,
+                    color=requirement.color,
+                    required_g=requirement.required_g,
+                    available_g=available_g,
+                    status=status,
+                )
+            )
+
+        overall_status = "ok" if all(item.status == "ok" for item in estimates) else "risk"
+        return ProjectEstimateResponse(project=project, estimates=estimates, overall_status=overall_status)
+
+    def _create_consumption_proposal(
+        self,
+        request: ConsumptionProposalRequest,
+        context: dict,
+    ) -> ConsumptionProposalResponse:
+        items = self._stock_items(context)
+        if items is None:
+            return create_consumption_proposal(request)
+
+        amount_g = request.amount_g or self._extract_amount_g(request.user_message)
+        candidates = self._find_consumption_candidates(request.user_message, items)
+        item = candidates[0] if len(candidates) == 1 else None
+        requested_project_name = self._extract_project_name(request.user_message)
+        project = self._find_project_exact(request.user_message, self._projects(context) or [])
+
+        if amount_g is None:
+            return create_consumption_proposal(request)
+
+        if len(candidates) > 1:
+            options = "\n".join(
+                f"- {candidate.brand} {candidate.name}: {candidate.weight_remaining_g:g}g restants"
+                for candidate in candidates[:5]
+            )
+            return ConsumptionProposalResponse(
+                item=None,
+                amount_g=amount_g,
+                action=None,
+                message=(
+                    "J'ai trouve plusieurs bobines possibles pour cette consommation. "
+                    "Precisez la marque ou la reference pour que je prepare la bonne saisie:\n"
+                    f"{options}\n\nAucune donnee n'a ete modifiee."
+                    f"{self._source_note(context)}"
+                ),
+            )
+
+        if item is None:
+            return ConsumptionProposalResponse(
+                item=None,
+                amount_g=amount_g,
+                action=None,
+                message=(
+                    "Je peux preparer la saisie, mais je n'ai pas identifie "
+                    "une bobine correspondant exactement a la matiere et a la couleur demandees. "
+                    "Aucune donnee n'a ete modifiee."
+                    f"{self._source_note(context)}"
+                ),
+            )
+
+        project_missing_action = None
+        if requested_project_name and project is None:
+            project_missing_action = ProposedAction(
+                type="create_project",
+                label=f"Creer le projet {requested_project_name}",
+                payload={
+                    "name": requested_project_name,
+                    "description": (
+                        "Projet cree avec l'assistant Spooly. "
+                        f"Besoin initial detecte: {amount_g:g}g sur {item.name}."
+                    ),
+                    "filament_id": item.id,
+                    "amount_g": amount_g,
+                },
+                requires_confirmation=False,
+            )
+
+        remaining_before_g = item.weight_remaining_g
+        remaining_after_g = max(remaining_before_g - amount_g, 0)
+        message = (
+            f"Je propose d'enregistrer {amount_g:g}g de consommation sur {item.name}. "
+            f"La bobine contient actuellement {remaining_before_g:g}g; "
+            f"il resterait {remaining_after_g:g}g apres validation. "
+            "Aucune donnee n'a ete modifiee."
+        )
+        if amount_g > remaining_before_g:
+            message += (
+                f"\n\nAttention: la quantite demandee depasse le stock restant "
+                f"de {amount_g - remaining_before_g:g}g."
+            )
+        if requested_project_name and project is None:
+            message += (
+                f"\n\nJe n'ai pas trouve le projet {requested_project_name}. "
+                "Vous pouvez le creer avant d'associer cette consommation au projet."
+            )
+        message += self._source_note(context)
+
+        return ConsumptionProposalResponse(
+            item=item,
+            amount_g=amount_g,
+            action=ProposedAction(
+                type="create_consumption",
+                label=(
+                    f"Enregistrer {amount_g:g}g consommes sur {item.name} "
+                    f"({remaining_after_g:g}g restants)"
+                ),
+                payload={
+                    "filament_id": item.id,
+                    "amount_g": amount_g,
+                    "type": "PRINT",
+                    **({"project_id": project.id} if project else {}),
+                    **({"pending_project_name": requested_project_name} if requested_project_name and project is None else {}),
+                },
+            ),
+            message=message,
+            extra_actions=[project_missing_action] if project_missing_action else [],
+        )
+
+    def _find_project(self, query: str, projects: list[ProjectItem]) -> ProjectItem | None:
+        normalized = query.lower()
+        for project in projects:
+            if project.name.lower() in normalized:
+                return project
+        for project in projects:
+            project_name = project.name.lower()
+            if any(token in project_name for token in normalized.split() if len(token) > 2):
+                return project
+        return projects[0] if projects else None
+
+    def _find_project_exact(self, query: str, projects: list[ProjectItem]) -> ProjectItem | None:
+        normalized = query.lower()
+        for project in projects:
+            if project.name.lower() in normalized:
+                return project
+        return None
+
+    def _display_stock_item(self, item: StockItem) -> str:
+        label = item.name
+        if item.brand and item.brand.lower() not in label.lower():
+            label = f"{label} {item.brand}"
+        return label
+
+    def _extract_project_name(self, query: str) -> str | None:
+        match = re.search(r"\bprojet\s+(.+?)(?:[.!?]|$)", query, flags=re.IGNORECASE)
+        if not match:
+            return None
+        name = match.group(1).strip(" .,:;")
+        return name[:80] if name else None
+
+    def _find_consumption_item(self, query: str, items: list[StockItem]) -> StockItem | None:
+        candidates = self._find_consumption_candidates(query, items)
+        return candidates[0] if candidates else None
+
+    def _find_consumption_candidates(self, query: str, items: list[StockItem]) -> list[StockItem]:
+        query_tokens = [token for token in self._tokens(query) if len(token) > 2]
+        requested_colors = self._requested_color_aliases(query)
+        best_score = 0
+        scored: list[tuple[int, StockItem]] = []
+        for item in items:
+            haystack = " ".join([item.name, item.brand, item.material, item.color]).lower()
+            if requested_colors and not self._haystack_matches_requested_color(haystack, requested_colors):
+                continue
+            score = sum(1 for token in query_tokens if token in haystack)
+            if requested_colors:
+                score += 3
+            if score > best_score:
+                best_score = score
+            if score > 0:
+                scored.append((score, item))
+
+        return [item for score, item in scored if score == best_score]
+
+    def _extract_amount_g(self, message: str) -> float | None:
+        match = re.search(r"(\d+(?:[,.]\d+)?)\s*(g|gr|grammes|kg)\b", message.lower())
+        if not match:
+            return None
+        value = float(match.group(1).replace(",", "."))
+        return value * 1000 if match.group(2) == "kg" else value
+
+    def _matches_stock_item(self, item: StockItem, query: str) -> bool:
+        normalized = query.lower()
+        haystack = " ".join([item.id, item.name, item.brand, item.material, item.color]).lower()
+        requested_colors = self._requested_color_aliases(query)
+        if requested_colors and not self._haystack_matches_requested_color(haystack, requested_colors):
+            return False
+        return all(
+            token in haystack
+            for token in self._tokens(normalized)
+            if len(token) > 1 and token not in requested_colors
+        )
+
+    def _requested_color_aliases(self, query: str) -> set[str]:
+        tokens = set(self._tokens(query))
+        requested: set[str] = set()
+        for aliases in self.color_aliases.values():
+            if tokens.intersection(aliases):
+                requested.update(aliases)
+        return requested
+
+    def _haystack_matches_requested_color(self, haystack: str, requested_colors: set[str]) -> bool:
+        tokens = set(self._tokens(haystack))
+        return any(color in tokens for color in requested_colors)
+
+    def _tokens(self, value: str) -> list[str]:
+        return re.findall(r"[a-zA-ZÀ-ÿ0-9#]+", value.lower())

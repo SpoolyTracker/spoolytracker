@@ -1,0 +1,12 @@
+{
+    "pdf_options": {
+        "format": "A4",
+        "margin": "20mm",
+        "printBackground": true,
+        "displayHeaderFooter": true,
+        "headerTemplate": "<div style='font-size: 10px; text-align: center; width: 100%; margin-top: 10px;'><span>SpoolyTracker Documentation</span></div>",
+        "footerTemplate": "<div style='font-size: 10px; text-align: center; width: 100%; margin-bottom: 10px;'><span class='pageNumber'></span> / <span class='totalPages'></span></div>"
+    },
+    "stylesheet": "docs/pdf-styles.css",
+    "body_class": "markdown-body"
+}

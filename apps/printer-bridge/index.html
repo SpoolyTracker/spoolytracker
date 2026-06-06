@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Spooly Printer Bridge</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #111827;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .icon {
+            font-size: 32px;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .status-card {
+            background: #1f2937;
+            padding: 15px;
+            border-radius: 8px;
+            width: 90%;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 5px solid #6366f1;
+        }
+
+        .printers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+            width: 90%;
+        }
+
+        .printer-card {
+            background: #1f2937;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #374151;
+        }
+
+        .log-container {
+            margin-top: auto;
+            width: 90%;
+            height: 150px;
+            background: #000;
+            border-radius: 8px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-y: auto;
+            color: #10b981;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div class="title">Spooly Printer Bridge</div>
+    </div>
+
+    <div class="status-card">
+        <div>
+            <div style="font-size: 12px; color: #9ca3af;">BRIDGE STATUS</div>
+            <div id="status" style="font-weight: bold; color: #10b981;">RUNNING</div>
+        </div>
+        <div>
+            <div style="font-size: 12px; color: #9ca3af;">PORT</div>
+            <div style="font-weight: bold;">9000</div>
+        </div>
+    </div>
+
+    <div style="margin-bottom: 20px; width: 90%;">
+        <details>
+            <summary style="cursor: pointer; color: #6366f1; font-weight: bold;">Add Printer +</summary>
+            <div style="background: #1f2937; padding: 15px; margin-top: 10px; border-radius: 8px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                    <input id="p_ip" placeholder="IP Address (LAN)"
+                        style="padding: 8px; border-radius: 4px; border: none;">
+                    <input id="p_code" placeholder="Access Code (Bambu) / API Key (Octo)"
+                        style="padding: 8px; border-radius: 4px; border: none;">
+                    <input id="p_serial" placeholder="Serial Number (Optional for Octo)"
+                        style="padding: 8px; border-radius: 4px; border: none;">
+                    <select id="p_type" style="padding: 8px; border-radius: 4px; border: none;">
+                        <option value="bambu">Bambu Lab</option>
+                        <option value="creality">Creality (Moonraker)</option>
+                        <option value="octoprint">Octoprint</option>
+                    </select>
+                </div>
+                <button onclick="addPrinter()"
+                    style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold;">CONNECT</button>
+            </div>
+        </details>
+    </div>
+
+    <div class="printers-grid" id="printers">
+        <!-- Printer Cards -->
+    </div>
+
+    <div class="log-container" id="log">
+        <div>[System] Bridge initialized...</div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        const logEl = document.getElementById('log');
+        const printersEl = document.getElementById('printers');
+
+        function log(msg) {
+            const line = document.createElement('div');
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logEl.appendChild(line);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function addPrinter() {
+            const config = {
+                ip: document.getElementById('p_ip').value,
+                accessCode: document.getElementById('p_code').value,
+                serial: document.getElementById('p_serial').value,
+                type: document.getElementById('p_type').value
+            };
+            
+            if (!config.ip) {
+                log('Error: IP Address required');
+                return;
+            }
+
+            // Fallback for serial if not provided
+            if (!config.serial) {
+                config.serial = config.ip;
+                log(`Using IP as Serial: ${config.serial}`);
+            }
+
+            ipcRenderer.send('add-printer', config);
+            log(`Requesting connection to ${config.serial}...`);
+        }
+
+        function updatePrinterCard(serial, status, data) {
+            try {
+                let card = document.getElementById(`card-${serial}`);
+                if (!card) {
+                    card = document.createElement('div');
+                    card.className = 'printer-card';
+                    card.id = `card-${serial}`;
+                    card.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                            <div style="font-weight:bold;">${serial}</div>
+                            <div id="status-${serial}" style="font-size:12px; padding:2px 5px; border-radius:4px; background:#374151;">CONNECTING</div>
+                        </div>
+                        <div id="info-${serial}" style="font-size:14px; color:#d1d5db;">
+                            Waiting for data...
+                        </div>
+                    `;
+                    printersEl.appendChild(card);
+                }
+
+                if (status) {
+                    const badge = document.getElementById(`status-${serial}`);
+                    badge.textContent = status.toUpperCase();
+                    if (status === 'connected') badge.style.background = '#10b981';
+                    else if (status === 'offline' || status === 'disconnected') badge.style.background = '#ef4444';
+                    else badge.style.background = '#eab308';
+                }
+
+                if (data) {
+                    // console.log('Parsed Data:', data); 
+                    const info = document.getElementById(`info-${serial}`);
+
+                    // Capture state before update
+                    const rawEl = document.getElementById(`raw-${serial}`);
+                    const isRawVisible = rawEl && rawEl.style.display === 'block';
+
+                    const status = data.status || {};
+
+                    if (data.raw) {
+                        card.dataset.rawData = JSON.stringify(data.raw, null, 2);
+                    }
+
+                    info.innerHTML = `
+                        <div>State: <span style="color:white">${status.state || '-'}</span></div>
+                        <div>File: <span style="color:white">${status.file || '-'}</span></div>
+                        <div>Progress: <span style="color:#6366f1">${status.progress || 0}%</span></div>
+                        <div>Nozzle: ${status.nozzleTemp}°C / Bed: ${status.bedTemp}°C</div>
+                        <div style="margin-top:5px; display:flex; gap:5px;">
+                            <button onclick="showRaw('${serial}')" style="font-size:10px; padding:2px 5px; cursor:pointer;">Show Raw</button>
+                            ${status.file ? `<button onclick="downloadGCode('${serial}', '${status.file}')" style="font-size:10px; padding:2px 5px; cursor:pointer; background:#6366f1; color:white; border:none; border-radius:2px;">Download G-Code</button>` : ''}
+                        </div>
+                        <pre id="raw-${serial}" style="display:none; color:#10b981; font-size:10px; max-height:200px; overflow:auto; background:black; padding:5px; margin-top:5px;"></pre>
+                    `;
+
+                    // Restore state
+                    const newRawEl = document.getElementById(`raw-${serial}`);
+                    if (isRawVisible && newRawEl) {
+                        newRawEl.style.display = 'block';
+                        newRawEl.textContent = card.dataset.rawData; // Ensure content is set
+                    }
+                }
+            } catch (e) {
+                log(`UI Error: ${e.message}`);
+                console.error(e);
+            }
+        }
+
+        function downloadGCode(serial, filename) {
+            ipcRenderer.send('download-gcode', { serial, filename });
+        }
+
+        function showRaw(serial) {
+            const card = document.getElementById(`card-${serial}`);
+            const rawContainer = document.getElementById(`raw-${serial}`);
+            if (card && rawContainer) {
+                rawContainer.style.display = rawContainer.style.display === 'none' ? 'block' : 'none';
+                rawContainer.textContent = card.dataset.rawData || 'No Data';
+            }
+        }
+
+        ipcRenderer.on('bridge-event', (event, data) => {
+            if (data.type === 'log') {
+                log(data.message);
+            } else if (data.type === 'printer_status') {
+                updatePrinterCard(data.serial, data.status, null);
+            } else if (data.type === 'printer_data') {
+                console.log('RX printer_data:', data); // Log the full event object
+                log(`RX Data for ${data.serial}`); // Log to on-screen log
+                updatePrinterCard(data.serial, null, data.data);
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,32 @@
+# Build stage
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+# API URL must be provided at build time for Vite
+ARG VITE_API_URL
+ARG VITE_APPSTORE_URL
+ARG VITE_PLAYSTORE_URL
+ARG VITE_FIREBASE_URL
+ARG VITE_DISCORD_URL
+ARG VITE_GOOGLE_CLIENT_ID
+ARG VITE_AI_ENGINE_URL
+
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_APPSTORE_URL=$VITE_APPSTORE_URL
+ENV VITE_PLAYSTORE_URL=$VITE_PLAYSTORE_URL
+ENV VITE_FIREBASE_URL=$VITE_FIREBASE_URL
+ENV VITE_DISCORD_URL=$VITE_DISCORD_URL
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+ENV VITE_AI_ENGINE_URL=$VITE_AI_ENGINE_URL
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]

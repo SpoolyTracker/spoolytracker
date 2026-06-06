@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+.env
+.env.*
+*.sqlite
+*.sqlite3
+*.bak
+uploads
+logs
+npm-debug.log*
+tsconfig.build.tsbuildinfo
