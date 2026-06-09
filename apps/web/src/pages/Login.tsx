@@ -4,7 +4,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff } from 'lucide-react';
-import { appConfig } from '../config';
 
 export default function LoginPage() {
     const [username, setUsername] = useState('');
@@ -32,7 +31,7 @@ export default function LoginPage() {
     }, [loginWithSocial, navigate]);
 
     useEffect(() => {
-        const clientId = appConfig.googleClientId;
+        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
         
         if (clientId && window.google) {
             const buttonDiv = document.getElementById("google-button");

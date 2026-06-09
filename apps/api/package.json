@@ -1,9 +1,10 @@
 {
   "name": "api",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "",
   "author": "",
-  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -11,7 +12,6 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "bootstrap:selfhost": "node dist/bootstrap-selfhost.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",

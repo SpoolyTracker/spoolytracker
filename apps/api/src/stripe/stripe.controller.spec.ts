@@ -34,11 +34,8 @@ const mockSubscriptionService = {
 
 describe('StripeController', () => {
   let controller: StripeController;
-  const originalSelfHosted = process.env.SELF_HOSTED;
 
   beforeEach(async () => {
-    delete process.env.SELF_HOSTED;
-
     const module: TestingModule = await Test.createTestingModule({
       controllers: [StripeController],
       providers: [
@@ -50,14 +47,6 @@ describe('StripeController', () => {
 
     controller = module.get<StripeController>(StripeController);
     jest.clearAllMocks();
-  });
-
-  afterAll(() => {
-    if (originalSelfHosted === undefined) {
-      delete process.env.SELF_HOSTED;
-    } else {
-      process.env.SELF_HOSTED = originalSelfHosted;
-    }
   });
 
   describe('billing access', () => {
@@ -129,19 +118,6 @@ describe('StripeController', () => {
           user: { userId: 1 },
         }),
       ).rejects.toThrow(BadRequestException);
-    });
-
-    it('disables billing endpoints in self-hosted mode', async () => {
-      process.env.SELF_HOSTED = 'true';
-
-      await expect(
-        controller.createCheckoutSession(
-          { organizationId: 10, plan: 'pro' },
-          { user: { userId: 1, email: 'admin@test.com' } },
-        ),
-      ).rejects.toThrow(ForbiddenException);
-
-      expect(mockStripeService.createCheckoutSession).not.toHaveBeenCalled();
     });
   });
 });

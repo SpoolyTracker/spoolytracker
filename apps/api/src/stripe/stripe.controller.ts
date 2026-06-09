@@ -17,7 +17,6 @@ import { StripeService } from './stripe.service';
 import { OrganizationService } from '../organization/organization.service';
 import { SubscriptionService } from './subscription.service';
 import type { Request as ExpressRequest } from 'express';
-import { isSelfHosted } from '../common/self-hosted';
 
 @Controller('stripe')
 export class StripeController {
@@ -27,15 +26,7 @@ export class StripeController {
     private readonly subscriptionService: SubscriptionService,
   ) {}
 
-  private assertBillingEnabled() {
-    if (isSelfHosted()) {
-      throw new ForbiddenException('Billing is disabled in self-hosted mode');
-    }
-  }
-
   private async assertCanManageBilling(user: any, organizationId: number) {
-    this.assertBillingEnabled();
-
     if (!Number.isFinite(organizationId) || organizationId <= 0) {
       throw new BadRequestException('Valid organizationId is required');
     }
@@ -71,7 +62,6 @@ export class StripeController {
     },
     @Request() req: any,
   ) {
-    this.assertBillingEnabled();
     await this.assertCanManageBilling(req.user, Number(body.organizationId));
 
     return this.stripeService.createCheckoutSession(
@@ -89,7 +79,6 @@ export class StripeController {
     @Body() body: { organizationId: number; plan: 'pro' | 'enterprise' },
     @Request() req: any,
   ) {
-    this.assertBillingEnabled();
     await this.assertCanManageBilling(req.user, Number(body.organizationId));
 
     return this.stripeService.upgradeSubscription(
@@ -104,7 +93,6 @@ export class StripeController {
     @Body() body: { organizationId: number },
     @Request() req: any,
   ) {
-    this.assertBillingEnabled();
     await this.assertCanManageBilling(req.user, Number(body.organizationId));
 
     const org = await this.organizationService.findOne(body.organizationId);
@@ -119,7 +107,6 @@ export class StripeController {
   @Get('organizations/:id/subscriptions')
   @UseGuards(JwtAuthGuard)
   async getSubscriptions(@Param('id') id: string, @Request() req: any) {
-    this.assertBillingEnabled();
     const organizationId = parseInt(id, 10);
     await this.assertCanManageBilling(req.user, organizationId);
 
@@ -133,7 +120,6 @@ export class StripeController {
     @Headers('stripe-signature') signature: string,
     @Req() request: RawBodyRequest<ExpressRequest>,
   ) {
-    this.assertBillingEnabled();
     if (!request.rawBody) {
       console.error(
         '⚠️ Webhook error: rawBody is missing! Make sure { rawBody: true } is set in main.ts',

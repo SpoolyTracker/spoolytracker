@@ -31,7 +31,6 @@ import {
 } from './dto/storage-unit.dto';
 import { Organization } from '../organization/organization.entity';
 import { PLAN_LIMITS } from '../common/constants';
-import { isSelfHosted, SELF_HOSTED_PLAN } from '../common/self-hosted';
 
 export interface TigerTagData {
   tagId: string;
@@ -87,8 +86,6 @@ export class FilamentService {
     user?: any,
     requestedCount: number = 1,
   ) {
-    if (isSelfHosted()) return;
-
     // Bypass for System Admins
     const isSystemAdmin =
       user?.systemRole === 'admin' ||
@@ -131,17 +128,6 @@ export class FilamentService {
       where: { id: organizationId },
     });
     if (!org) return;
-
-    if (isSelfHosted()) {
-      await this.organizationRepository.update(organizationId, {
-        requiresQuotaSelection: false,
-      });
-      await this.filamentRepository.update(
-        { organization: { id: organizationId } },
-        { isLocked: false },
-      );
-      return;
-    }
 
     const limits = (PLAN_LIMITS as any)[(org.plan || 'free').toLowerCase()];
     if (limits.maxSpoolsPerOrg === Infinity) {
@@ -470,6 +456,7 @@ export class FilamentService {
   async getMobilePullSnapshot(
     organizationId: number,
     includeAllReferenceData = false,
+    clientReferenceDataVersion?: string,
   ) {
     const org = await this.organizationRepository.findOne({
       where: { id: organizationId },
@@ -524,6 +511,60 @@ export class FilamentService {
             : []),
         ];
 
+    const referenceDataVersion = await this.getMobileReferenceDataVersion(
+      organizationId,
+      includeAllReferenceData,
+    );
+    const referenceDataUnchanged =
+      !!clientReferenceDataVersion &&
+      clientReferenceDataVersion === referenceDataVersion;
+
+    const [
+      consumptionLogs,
+      storageUnits,
+      referenceData,
+    ] = await Promise.all([
+      this.getConsumptionLogsForMobileSync(organizationId),
+      this.getStorageUnits(organizationId),
+      referenceDataUnchanged
+        ? Promise.resolve(null)
+        : Promise.all([
+            this.brandRepository.find({
+              where: scopedWhere,
+              order: { name: 'ASC' },
+              relations: ['organization'],
+            }),
+            this.materialRepository.find({
+              where: scopedWhere,
+              order: { name: 'ASC' },
+              relations: ['organization'],
+            }),
+            this.typeRepository.find({
+              where: scopedWhere,
+              order: { name: 'ASC' },
+              relations: ['organization'],
+            }),
+            this.optionRepository.find({
+              where: scopedWhere,
+              order: { category: 'ASC', name: 'ASC' },
+              relations: ['organization'],
+            }),
+            this.brandCatalogRepository.find({
+              where: brandCatalogWhere,
+              relations: ['brand', 'material', 'type', 'organization'],
+              order: { brand: { name: 'ASC' } },
+            }),
+            this.colorReferenceRepository.find({
+              where: colorReferenceWhere,
+              relations: ['brand', 'material', 'type', 'organization'],
+              order: { name: 'ASC' },
+            }),
+            this.tigerMappingService.getMappingsForSync(
+              includeAllReferenceData ? null : organizationId,
+            ),
+          ]),
+    ]);
+
     const [
       brands,
       materials,
@@ -532,47 +573,9 @@ export class FilamentService {
       brandCatalog,
       colorReferences,
       tigerMappings,
-      consumptionLogs,
-      storageUnits,
-    ] = await Promise.all([
-      this.brandRepository.find({
-        where: scopedWhere,
-        order: { name: 'ASC' },
-        relations: ['organization'],
-      }),
-      this.materialRepository.find({
-        where: scopedWhere,
-        order: { name: 'ASC' },
-        relations: ['organization'],
-      }),
-      this.typeRepository.find({
-        where: scopedWhere,
-        order: { name: 'ASC' },
-        relations: ['organization'],
-      }),
-      this.optionRepository.find({
-        where: scopedWhere,
-        order: { category: 'ASC', name: 'ASC' },
-        relations: ['organization'],
-      }),
-      this.brandCatalogRepository.find({
-        where: brandCatalogWhere,
-        relations: ['brand', 'material', 'type', 'organization'],
-        order: { brand: { name: 'ASC' } },
-      }),
-      this.colorReferenceRepository.find({
-        where: colorReferenceWhere,
-        relations: ['brand', 'material', 'type', 'organization'],
-        order: { name: 'ASC' },
-      }),
-      this.tigerMappingService.getMappingsForSync(
-        includeAllReferenceData ? null : organizationId,
-      ),
-      this.getConsumptionLogsForMobileSync(organizationId),
-      this.getStorageUnits(organizationId),
-    ]);
+    ] = referenceData || [undefined, undefined, undefined, undefined, undefined, undefined, undefined];
 
-    const optionsGrouped = options.reduce(
+    const optionsGrouped = Array.isArray(options) ? options.reduce(
       (acc, option) => {
         if (!acc[option.category]) {
           acc[option.category] = [];
@@ -581,9 +584,9 @@ export class FilamentService {
         return acc;
       },
       {} as Record<string, FilamentOption[]>,
-    );
+    ) : undefined;
 
-    const normalizedBrandCatalog = brandCatalog.map((item) => ({
+    const normalizedBrandCatalog = Array.isArray(brandCatalog) ? brandCatalog.map((item) => ({
       ...item,
       density: item.density_gcm3,
       densityGcm3: item.density_gcm3,
@@ -591,10 +594,12 @@ export class FilamentService {
       nozzleTempMax: item.nozzle_temp_max,
       bedTempMin: item.bed_temp_min,
       bedTempMax: item.bed_temp_max,
-    }));
+    })) : undefined;
 
     return {
       filaments,
+      referenceDataVersion,
+      referenceDataUnchanged,
       brands,
       materials,
       types,
@@ -606,6 +611,46 @@ export class FilamentService {
       storageUnits,
       organization: org,
     };
+  }
+
+  private async getMobileReferenceDataVersion(
+    organizationId: number,
+    includeAllReferenceData: boolean,
+  ): Promise<string> {
+    const scopeCondition = includeAllReferenceData
+      ? '1=1'
+      : '("organizationId" IS NULL OR "organizationId" = $1)';
+    const snakeScopeCondition = includeAllReferenceData
+      ? '1=1'
+      : '("organization_id" IS NULL OR "organization_id" = $1)';
+    const params = includeAllReferenceData ? [] : [organizationId];
+
+    const rows = await this.filamentRepository.manager.query(
+      `
+      SELECT 'brand' AS table_name, COUNT(*)::text AS count_value, COALESCE(MAX(id), 0)::text AS max_id, COALESCE(MAX(EXTRACT(EPOCH FROM "createdAt") * 1000), 0)::bigint::text AS max_time FROM brand WHERE ${scopeCondition}
+      UNION ALL
+      SELECT 'material', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM "createdAt") * 1000), 0)::bigint::text FROM filament_material WHERE ${scopeCondition}
+      UNION ALL
+      SELECT 'type', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM "createdAt") * 1000), 0)::bigint::text FROM filament_real_type WHERE ${scopeCondition}
+      UNION ALL
+      SELECT 'option', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM "createdAt") * 1000), 0)::bigint::text FROM filament_option WHERE ${scopeCondition}
+      UNION ALL
+      SELECT 'brand_catalog', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM "updated_at") * 1000), 0)::bigint::text FROM brand_catalog WHERE ${snakeScopeCondition}
+      UNION ALL
+      SELECT 'color_reference', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM "updated_at") * 1000), 0)::bigint::text FROM filament_color_reference WHERE ${snakeScopeCondition} AND "is_active" = true
+      UNION ALL
+      SELECT 'tiger_brand', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM updated_at) * 1000), 0)::bigint::text FROM tiger_brand_mappings WHERE ${snakeScopeCondition}
+      UNION ALL
+      SELECT 'tiger_material', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM updated_at) * 1000), 0)::bigint::text FROM tiger_material_mappings WHERE ${snakeScopeCondition}
+      UNION ALL
+      SELECT 'tiger_type', COUNT(*)::text, COALESCE(MAX(id), 0)::text, COALESCE(MAX(EXTRACT(EPOCH FROM updated_at) * 1000), 0)::bigint::text FROM tiger_type_mappings WHERE ${snakeScopeCondition}
+      `,
+      params,
+    );
+
+    return (rows as Array<{ table_name: string; count_value: string; max_id: string; max_time: string }>)
+      .map((row) => `${row.table_name}:${row.count_value}:${row.max_id}:${row.max_time}`)
+      .join('|');
   }
 
   private async getConsumptionLogsForMobileSync(organizationId: number) {
@@ -790,7 +835,7 @@ export class FilamentService {
       user?.isSuperAdmin;
 
     const orgId = filament.organization?.id || filament.organizationId;
-    if (orgId && !isSystemAdmin && !isSelfHosted()) {
+    if (orgId && !isSystemAdmin) {
       const org = await this.organizationRepository.findOne({
         where: { id: orgId },
       });
@@ -801,7 +846,7 @@ export class FilamentService {
       }
     }
 
-    if (filament.isLocked && !isSelfHosted()) {
+    if (filament.isLocked) {
       // Allow unlocking if explicitly requested and under quota
       if (updateFilamentDto.isLocked === false) {
         if (orgId && !isSystemAdmin) {
@@ -811,9 +856,7 @@ export class FilamentService {
           const org = await this.organizationRepository.findOne({
             where: { id: orgId },
           });
-          const limits = isSelfHosted()
-            ? PLAN_LIMITS[SELF_HOSTED_PLAN]
-            : PLAN_LIMITS[org?.plan ?? 'free'];
+          const limits = PLAN_LIMITS[org?.plan ?? 'free'];
           if (
             limits.maxSpoolsPerOrg !== Infinity &&
             activeSpoolCount >= limits.maxSpoolsPerOrg
@@ -1062,7 +1105,7 @@ export class FilamentService {
       user?.systemRole === 'moderator' ||
       user?.isSuperAdmin;
     const orgId = filament.organization?.id || filament.organizationId;
-    if (orgId && !isSystemAdmin && !isSelfHosted()) {
+    if (orgId && !isSystemAdmin) {
       const org = await this.organizationRepository.findOne({
         where: { id: orgId },
       });
@@ -1073,7 +1116,7 @@ export class FilamentService {
       }
     }
 
-    if (filament.isLocked && !isSelfHosted()) {
+    if (filament.isLocked) {
       throw new ForbiddenException(
         'This filament is locked due to quota restrictions. Please upgrade your plan or resolve quota issues to consume it.',
       );
@@ -1467,7 +1510,7 @@ export class FilamentService {
       await this.checkPlanLimits(orgId, user);
     }
 
-    if (original.isLocked && !isSelfHosted()) {
+    if (original.isLocked) {
       throw new ForbiddenException('You cannot duplicate a locked filament.');
     }
 
@@ -1611,7 +1654,7 @@ export class FilamentService {
     });
 
     // 2. Check Plan for Analytics
-    const canViewAnalytics = isSelfHosted() || org.plan !== 'free' || isSuperAdmin;
+    const canViewAnalytics = org.plan !== 'free' || isSuperAdmin;
 
     if (!canViewAnalytics) {
       return {
@@ -1952,7 +1995,7 @@ export class FilamentService {
       throw new NotFoundException('Consumption log not found');
     }
 
-    if (log.filament?.isLocked && !isSelfHosted()) {
+    if (log.filament?.isLocked) {
       throw new ForbiddenException(
         'Cannot modify consumption history of a locked filament.',
       );
@@ -1981,9 +2024,7 @@ export class FilamentService {
         const org = await this.organizationRepository.findOne({
           where: { id: orgId },
         });
-        const limits = isSelfHosted()
-          ? PLAN_LIMITS[SELF_HOSTED_PLAN]
-          : PLAN_LIMITS[org?.plan ?? 'free'];
+        const limits = PLAN_LIMITS[org?.plan ?? 'free'];
 
         if (
           limits.maxSpoolsPerOrg !== Infinity &&
@@ -2045,7 +2086,7 @@ export class FilamentService {
       throw new NotFoundException('Consumption log not found');
     }
 
-    if (log.filament?.isLocked && !isSelfHosted()) {
+    if (log.filament?.isLocked) {
       throw new ForbiddenException(
         'Cannot modify consumption history of a locked filament.',
       );
@@ -2098,9 +2139,7 @@ export class FilamentService {
           const org = await this.organizationRepository.findOne({
             where: { id: orgId },
           });
-          const limits = isSelfHosted()
-            ? PLAN_LIMITS[SELF_HOSTED_PLAN]
-            : PLAN_LIMITS[org?.plan ?? 'free'];
+          const limits = PLAN_LIMITS[org?.plan ?? 'free'];
 
           if (
             limits.maxSpoolsPerOrg !== Infinity &&

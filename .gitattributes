@@ -1,8 +1,0 @@
-*.sh text eol=lf
-Dockerfile text eol=lf
-*.yml text eol=lf
-*.yaml text eol=lf
-*.md text
-*.ts text
-*.tsx text
-*.json text

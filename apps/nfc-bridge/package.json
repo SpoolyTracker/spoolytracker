@@ -37,7 +37,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "AGPL-3.0-or-later",
+  "license": "ISC",
   "description": "",
   "dependencies": {
     "nfc-pcsc": "^0.8.1",

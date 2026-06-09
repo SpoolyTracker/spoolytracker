@@ -278,7 +278,10 @@ export class FilamentController {
   }
 
   @Get('sync/mobile-pull')
-  getMobilePullSnapshot(@Req() req: any) {
+  getMobilePullSnapshot(
+    @Req() req: any,
+    @Query('referenceDataVersion') referenceDataVersion?: string,
+  ) {
     const organizationId = req.organizationId;
     if (!organizationId) {
       return Promise.resolve();
@@ -293,6 +296,7 @@ export class FilamentController {
     return this.filamentService.getMobilePullSnapshot(
       organizationId,
       includeAllReferenceData,
+      referenceDataVersion,
     );
   }
 

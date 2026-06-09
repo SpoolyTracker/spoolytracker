@@ -2,7 +2,6 @@ import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import * as packageJson from '../../package.json';
-import { isSelfHosted } from '../common/self-hosted';
 
 @ApiTags('version')
 @Controller('version')
@@ -26,7 +25,6 @@ export class VersionController {
         'MOBILE_UPDATE_URL_ANDROID',
         'https://play.google.com/store/apps/details?id=com.spoolytracker.mobile',
       ),
-      selfHosted: isSelfHosted(),
     };
   }
 }
