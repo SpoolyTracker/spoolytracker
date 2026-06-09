@@ -14,10 +14,9 @@ import { api } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import GCodeAnalysisDialog from './GCodeAnalysisDialog';
 import { MobileDownloadModal } from './modals/MobileDownloadModal';
-import { appConfig } from '../config';
 
 const drawerWidth = 260;
-const DISCORD_INVITE_URL = appConfig.discordUrl || 'https://discord.gg/vQMf6pds';
+const DISCORD_INVITE_URL = import.meta.env.VITE_DISCORD_URL || 'https://discord.gg/vQMf6pds';
 
 interface SidebarProps {
     drawerOpen: boolean;

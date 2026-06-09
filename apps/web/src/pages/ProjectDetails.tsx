@@ -186,7 +186,7 @@ export default function ProjectDetailsPage() {
 
             // Fetch Organization for Limits
             const orgId = localStorage.getItem('organization_id') || '1';
-            fetch(`${BASE_URL}/organizations/${orgId}`, {
+            fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/organizations/${orgId}`, {
                 headers: { 'Authorization': `Bearer ${token}`, 'x-organization-id': orgId },
             }).then(r => r.ok ? r.json() : null)
                 .then(setOrganization)

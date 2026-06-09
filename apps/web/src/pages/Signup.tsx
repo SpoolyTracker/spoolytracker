@@ -5,7 +5,6 @@ import { api } from '../api';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { appConfig } from '../config';
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\-\/\\+\*@#_]).{8,}$/;
 
@@ -29,7 +28,7 @@ export default function SignupPage() {
 
     useEffect(() => {
         // Initialize Google Identity Services
-        const clientId = appConfig.googleClientId;
+        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
         if (clientId && window.google) {
             const buttonDiv = document.getElementById("google-signup-button");
             if (buttonDiv) {

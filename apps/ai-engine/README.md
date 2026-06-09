@@ -196,7 +196,7 @@ Le workflow `deploy.yml` build et push maintenant:
 - Landing
 - AI Engine
 
-Le workflow public `docker-publish.yml` build et publie les images GHCR.
+Variables a definir dans les environnements GitHub `staging` et `production`.
 
 Obligatoires:
 
@@ -214,13 +214,22 @@ OLLAMA_BASE_URL=http://ollama:11434
 OLLAMA_MODEL=llama3.2
 ```
 
-Variables utiles pour un deploiement self-host:
+Secrets deja necessaires au deploy existant:
 
 ```txt
+OVH_SSH_HOST
+OVH_SSH_USER
+OVH_SSH_KEY
+GH_PAT
 JWT_SECRET
+VITE_API_URL
 REDIS_PASSWORD
-AI_ENGINE_CORS_ORIGINS
-AI_LLM_PROVIDER
+SMTP_USER
+SMTP_PASS
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+STRIPE_PRO_PRICE_ID
+STRIPE_ENTERPRISE_PRICE_ID
 ```
 
 Pas besoin de secret specifique pour l'auth utilisateur IA: le web transmet le JWT utilisateur au moteur IA, et le moteur le relaie a l'API.

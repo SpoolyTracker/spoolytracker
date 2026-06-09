@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import { AlertTriangle, Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { api, BASE_URL } from '../api';
+import { api } from '../api';
 import type { Filament } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { getFilamentTitle } from '../utils/filament-utils';
@@ -82,7 +82,7 @@ export default function ResolveQuotaPage() {
             const orgId = localStorage.getItem('organization_id');
             if (!orgId) throw new Error('No organization ID');
 
-            const res = await fetch(`${BASE_URL}/organizations/${orgId}/resolve-quota`, {
+            const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/organizations/${orgId}/resolve-quota`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

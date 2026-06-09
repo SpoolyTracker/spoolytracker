@@ -15,7 +15,6 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectFile, ProjectFileType } from './entities/project-file.entity';
 import { GcodeAnalyzerService } from '../gcode/gcode-analyzer.service';
 import { PLAN_LIMITS } from '../common/constants';
-import { isSelfHosted, SELF_HOSTED_PLAN } from '../common/self-hosted';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -195,7 +194,7 @@ export class ProjectsService {
       user.systemRole === 'admin' ||
       user.systemRole === 'super_admin';
 
-    if (!isSystemAdmin && !isSelfHosted()) {
+    if (!isSystemAdmin) {
       // Check Quota here
       const count = await this.projectsRepository.count({
         where: { organization: { id: user.organizationId } },
@@ -206,6 +205,8 @@ export class ProjectsService {
       });
       if (!org) throw new NotFoundException('Organization not found');
 
+      // Use PLAN_LIMITS
+      const { PLAN_LIMITS } = require('../common/constants');
       const limits = PLAN_LIMITS[org.plan || 'free'];
       const maxProjects = limits?.maxProjectsPerOrg ?? 3;
 
@@ -406,9 +407,7 @@ export class ProjectsService {
     const project = await this.findOne(projectId, user);
 
     // Check file size against plan limit
-    const plan = isSelfHosted()
-      ? SELF_HOSTED_PLAN
-      : project.organization?.plan || 'free';
+    const plan = project.organization?.plan || 'free';
     const limits = PLAN_LIMITS[plan];
     const maxMb = limits?.maxFileUploadSizeMb || 10;
     if (file.size > maxMb * 1024 * 1024) {
@@ -1063,12 +1062,11 @@ export class ProjectsService {
     });
     const now = new Date();
     const isPro =
-      isSelfHosted() ||
-      (org &&
+      org &&
       (org.plan === 'pro' ||
         org.plan === 'enterprise' ||
         org.plan === 'beta' ||
-        (org.trialEndsAt && new Date(org.trialEndsAt) > now)));
+        (org.trialEndsAt && new Date(org.trialEndsAt) > now));
 
     if (!isPro) {
       // Return RESTRICTED status instead of 403 to allow UI upsell

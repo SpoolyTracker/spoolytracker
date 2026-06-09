@@ -96,7 +96,7 @@ export interface Organization {
     id: number;
     name: string;
     slug: string;
-    plan: 'free' | 'pro' | 'enterprise' | 'beta' | 'selfhost';
+    plan: 'free' | 'pro' | 'enterprise' | 'beta';
     manualPlanEndDate?: string | null;
     stripeSubscriptionEndDate?: string | null;
     trialEndsAt?: string | null;
@@ -271,8 +271,8 @@ export interface Project {
     labor_hourly_rate?: number;
 }
 
-export const BASE_URL = appConfig.apiUrl;
-export const AI_ENGINE_URL = appConfig.aiEngineUrl;
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export const AI_ENGINE_URL = import.meta.env.VITE_AI_ENGINE_URL || 'http://localhost:8000';
 const API_URL = `${BASE_URL}/filaments`;
 const AUTH_URL = `${BASE_URL}/auth`;
 const REF_URL = `${BASE_URL}/reference-data`;
@@ -1789,4 +1789,3 @@ export const aiEngine = {
     },
 };
 
-import { appConfig } from './config';

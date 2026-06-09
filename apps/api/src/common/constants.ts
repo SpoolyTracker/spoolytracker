@@ -1,11 +1,4 @@
 export const PLAN_LIMITS = {
-  selfhost: {
-    maxSpoolsPerOrg: Infinity,
-    maxMembersPerOrg: Infinity,
-    maxProjectsPerOrg: Infinity,
-    maxFileUploadSizeMb: 200,
-    maxFilesPerProject: Infinity,
-  },
   free: {
     maxSpoolsPerOrg: 20,
     maxMembersPerOrg: 3,

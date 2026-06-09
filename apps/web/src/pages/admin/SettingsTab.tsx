@@ -18,7 +18,8 @@ import { Save, Info, Eye, Edit3, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../../contexts/AuthContext';
-import { BASE_URL } from '../../api';
+
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 export default function SettingsTab() {
     const { t } = useTranslation();

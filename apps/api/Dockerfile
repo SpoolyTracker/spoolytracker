@@ -15,10 +15,7 @@ WORKDIR /app
 COPY --from=build /app/package*.json ./
 RUN npm install --only=production
 COPY --from=build /app/dist ./dist
-COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh
 RUN mkdir -p uploads/gcode logs
 
 EXPOSE 3000
-ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["npm", "run", "start:prod"]

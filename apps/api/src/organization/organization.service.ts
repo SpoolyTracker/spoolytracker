@@ -18,7 +18,6 @@ import { Subscription } from '../stripe/subscription.entity';
 import { FilamentService } from '../filament/filament.service';
 import { Project } from '../projects/entities/project.entity';
 import { GlobalSetting } from '../admin/global-setting.entity';
-import { isSelfHosted, SELF_HOSTED_PLAN } from '../common/self-hosted';
 
 @Injectable()
 export class OrganizationService {
@@ -65,7 +64,7 @@ export class OrganizationService {
   }
 
   async create(name: string, ownerId?: number): Promise<Organization> {
-    if (ownerId && !isSelfHosted()) {
+    if (ownerId) {
       const user = await this.userRepository.findOne({
         where: { id: ownerId },
       });
@@ -94,7 +93,7 @@ export class OrganizationService {
     const organization = this.organizationRepository.create({
       name,
       slug,
-      plan: isSelfHosted() ? 'enterprise' : 'free',
+      plan: 'free',
     });
     const savedOrg = await this.organizationRepository.save(organization);
 
@@ -216,7 +215,7 @@ export class OrganizationService {
         actingUser?.systemRole === 'super_admin' ||
         actingUser?.isSuperAdmin;
 
-      if (!isSystemAdmin && !isSelfHosted()) {
+      if (!isSystemAdmin) {
         // Check Plan Limits (Members)
         const currentMemberCount = await this.userOrganizationRepository.count({
           where: { organizationId },
@@ -353,21 +352,6 @@ export class OrganizationService {
     plan: 'free' | 'pro' | 'enterprise' | 'beta',
     endDate?: string | Date,
   ): Promise<Organization | null> {
-    if (isSelfHosted()) {
-      await this.organizationRepository.update(organizationId, {
-        plan: 'enterprise',
-        manualPlanEndDate: null,
-        requiresQuotaSelection: false,
-        isStripeSubscriptionCanceled: false,
-        stripeSubscriptionEndDate: null,
-      } as any);
-      await this.filamentRepository.update(
-        { organization: { id: organizationId } },
-        { isLocked: false },
-      );
-      return this.findOne(organizationId);
-    }
-
     // Fetch current plan before update for notifications
     const currentOrg = await this.organizationRepository.findOne({
       where: { id: organizationId },
@@ -632,13 +616,11 @@ export class OrganizationService {
 
   async getWithStats(id: number): Promise<any> {
     // Trigger quota evaluation asynchronously on access (org switch/login)
-    if (!isSelfHosted()) {
-      this.filamentService
-        .evaluateOrganizationQuota(id)
-        .catch((e) =>
-          console.error(`Quota eval failed during access for org ${id}`, e),
-        );
-    }
+    this.filamentService
+      .evaluateOrganizationQuota(id)
+      .catch((e) =>
+        console.error(`Quota eval failed during access for org ${id}`, e),
+      );
 
     const org = await this.findOne(id);
     if (!org) return null;
@@ -669,14 +651,10 @@ export class OrganizationService {
     const projectsCount = await this.projectRepository.count({
       where: { organization: { id: id } },
     });
-    const limits = isSelfHosted()
-      ? (PLAN_LIMITS as any)[SELF_HOSTED_PLAN]
-      : (PLAN_LIMITS as any)[(org.plan || 'free').toLowerCase()];
+    const limits = (PLAN_LIMITS as any)[(org.plan || 'free').toLowerCase()];
 
     return {
       ...org,
-      plan: isSelfHosted() ? SELF_HOSTED_PLAN : org.plan,
-      requiresQuotaSelection: isSelfHosted() ? false : org.requiresQuotaSelection,
       stats: {
         spoolsCount,
         activeSpoolsCount,
@@ -707,10 +685,6 @@ export class OrganizationService {
   }
 
   async startTrial(organizationId: number): Promise<Organization> {
-    if (isSelfHosted()) {
-      throw new BadRequestException('Trials are disabled in self-hosted mode');
-    }
-
     const org = await this.findOne(organizationId);
     if (!org) throw new BadRequestException('Organization not found');
 
@@ -735,17 +709,6 @@ export class OrganizationService {
   ): Promise<void> {
     const org = await this.findOne(organizationId);
     if (!org) throw new BadRequestException('Organization not found');
-
-    if (isSelfHosted()) {
-      await this.filamentRepository.update(
-        { organization: { id: organizationId } },
-        { isLocked: false },
-      );
-      await this.organizationRepository.update(organizationId, {
-        requiresQuotaSelection: false,
-      });
-      return;
-    }
 
     // Verify count
     const limits = (PLAN_LIMITS as any)[(org.plan || 'free').toLowerCase()];

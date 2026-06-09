@@ -16,7 +16,6 @@ import { Download, ExternalLink, Info, Smartphone, X, Zap } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { appConfig } from '../../config';
 
 interface MobileDownloadModalProps {
     open: boolean;
@@ -25,10 +24,10 @@ interface MobileDownloadModalProps {
     isSuperAdmin?: boolean;
 }
 
-const PLAY_STORE_URL = appConfig.playStoreUrl || "https://play.google.com/store/apps/details?id=com.spoolytracker.mobile";
-const FIREBASE_URL = appConfig.firebaseUrl;
+const PLAY_STORE_URL = import.meta.env.VITE_PLAYSTORE_URL || "https://play.google.com/store/apps/details?id=com.spoolytracker.mobile";
+const FIREBASE_URL = import.meta.env.VITE_FIREBASE_URL || "https://appdistribution.firebase.dev/i/4d0485d45aad61c5";
 const BETA_OPTIN_URL = "https://play.google.com/apps/testing/com.spoolytracker.mobile";
-const IOS_APP_URL = appConfig.appStoreUrl || "https://apps.apple.com/app/id6760127825";
+const IOS_APP_URL = import.meta.env.VITE_APPSTORE_URL || "https://apps.apple.com/app/id6760127825";
 
 export const MobileDownloadModal: React.FC<MobileDownloadModalProps> = ({ open, onClose, plan, isSuperAdmin }) => {
     const { t } = useTranslation();
@@ -285,26 +284,25 @@ export const MobileDownloadModal: React.FC<MobileDownloadModalProps> = ({ open, 
                                 </Paper>
                             )}
 
-                            {FIREBASE_URL && (
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1, mt: 1 }}>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <SiFirebase size={16} color="#FFCA28" />
-                                        <Typography variant="body2" fontWeight={600} sx={{ color: 'var(--text-secondary)' }}>
-                                            Installation directe (Android)
-                                        </Typography>
-                                    </Box>
-                                    <Button
-                                        size="small"
-                                        component="a"
-                                        href={FIREBASE_URL}
-                                        target="_blank"
-                                        sx={{ fontSize: '0.75rem', fontWeight: 700 }}
-                                        startIcon={<Download size={14} />}
-                                    >
-                                        Fichier APK
-                                    </Button>
+                            {/* Firebase/APK */}
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1, mt: 1 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <SiFirebase size={16} color="#FFCA28" />
+                                    <Typography variant="body2" fontWeight={600} sx={{ color: 'var(--text-secondary)' }}>
+                                        Installation directe (Android)
+                                    </Typography>
                                 </Box>
-                            )}
+                                <Button
+                                    size="small"
+                                    component="a"
+                                    href={FIREBASE_URL}
+                                    target="_blank"
+                                    sx={{ fontSize: '0.75rem', fontWeight: 700 }}
+                                    startIcon={<Download size={14} />}
+                                >
+                                    Fichier APK
+                                </Button>
+                            </Box>
 
                         </Box>
                     </Grid>

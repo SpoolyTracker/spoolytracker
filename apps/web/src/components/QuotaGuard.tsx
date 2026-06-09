@@ -3,7 +3,6 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { CircularProgress, Box } from '@mui/material';
-import { isSelfHostedMode } from '../config';
 
 export default function QuotaGuard({ children }: { children: React.ReactNode }) {
     const [loading, setLoading] = useState(true);
@@ -16,14 +15,6 @@ export default function QuotaGuard({ children }: { children: React.ReactNode }) 
 
         async function checkQuota() {
             try {
-                if (isSelfHostedMode()) {
-                    if (isMounted) {
-                        setRequiresSelection(false);
-                        setLoading(false);
-                    }
-                    return;
-                }
-
                 // Bypass for admins, super admins, and moderators
                 const isBypass = user?.isSuperAdmin || ['super_admin', 'admin', 'moderator'].includes(user?.systemRole || '');
                 if (isBypass) {

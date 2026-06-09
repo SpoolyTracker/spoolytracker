@@ -16,8 +16,6 @@ __pycache__/
 .pytest_cache/
 **/.pytest_cache/
 *.py[cod]
-*.tsbuildinfo
-*.egg-info/
 
 # IDE / Editor
 .vscode/
@@ -33,7 +31,6 @@ __pycache__/
 .env.test.local
 .env.production.local
 *.env
-!.env.selfhost.example
 
 # Docker
 .docker/
@@ -56,16 +53,6 @@ Desktop.ini
 *.3mf
 apps/api/uploads/
 apps/api/logs/
-apps/api/*.sqlite
-apps/api/*.sqlite3
-apps/api/*.bak
-
-# Local bridge/mobile credentials
-apps/printer-bridge/printers.json
-apps/mobile/google-services.json
-apps/mobile/google-services.dev.json
-apps/mobile/android/app/google-services.json
-apps/mobile/android/app/*.keystore
 
 # Local AI engine runtime
 apps/ai-engine/*.sqlite3

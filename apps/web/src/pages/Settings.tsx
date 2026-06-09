@@ -8,7 +8,6 @@ import { SubscriptionHistory } from '../components/SubscriptionHistory';
 import { Box } from '@mui/material';
 import { Building, User, Users, Eye, EyeOff, Download, Printer as PrinterIcon, Nfc, Trash2, Bell, Settings as SettingsIcon, KeyRound, Copy, FileCode2 } from 'lucide-react';
 import { api, BASE_URL, type ApiKeySummary } from '../api';
-import { appConfig, isSelfHostedMode } from '../config';
 import { SecureImage } from '../components/SecureImage';
 import PageHeader from '../components/PageHeader';
 
@@ -40,7 +39,6 @@ export default function SettingsPage() {
     const { startTour } = useTour();
     const { t } = useTranslation();
     const currentOrgId = localStorage.getItem('organization_id') || '1';
-    const selfHosted = isSelfHostedMode();
     const [activeTab, setActiveTab] = useState<'organization' | 'members' | 'profile' | 'integrations' | 'downloads' | 'notifications'>('organization');
     const [organization, setOrganization] = useState<any>(null);
     const [orgSettings, setOrgSettings] = useState<{ lowStockThreshold: number | null, lowStockThresholdType: string }>({ lowStockThreshold: null, lowStockThresholdType: 'GRAMS' });
@@ -93,6 +91,7 @@ export default function SettingsPage() {
     }, []);
 
     const fetchMembers = async () => {
+        const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
         const response = await fetch(`${BASE_URL}/organizations/${currentOrgId}/users`, {
             headers: { 'Authorization': `Bearer ${token}`, 'x-organization-id': currentOrgId },
         });
@@ -121,7 +120,7 @@ export default function SettingsPage() {
     const [deletingAccount, setDeletingAccount] = useState(false);
 
     const handleLinkGoogle = () => {
-        const clientId = appConfig.googleClientId;
+        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
         if (!clientId || !window.google) {
             alert(t('settings.googleUnavailable', 'Google Sign-In is not available on this page.'));
             return;
@@ -409,11 +408,6 @@ export default function SettingsPage() {
     };
 
     const handleUpgrade = async (plan: 'pro' | 'enterprise') => {
-        if (selfHosted) {
-            alert('Billing is disabled in self-hosted mode.');
-            return;
-        }
-
         setUpgrading(true);
         try {
             // If the organization already has an active Stripe subscription, use the direct upgrade path
@@ -470,11 +464,6 @@ export default function SettingsPage() {
     };
 
     const handleManageSubscription = async () => {
-        if (selfHosted) {
-            alert('Billing is disabled in self-hosted mode.');
-            return;
-        }
-
         setUpgrading(true);
         try {
             const res = await fetch(`${BASE_URL}/stripe/create-portal-session`, {
@@ -928,26 +917,24 @@ export default function SettingsPage() {
                                 <div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
                                         <h3 style={{ fontSize: '28px', fontWeight: 'bold', margin: 0, textTransform: 'capitalize', letterSpacing: '-0.5px' }}>
-                                            {selfHosted ? 'Self-hosted' : `${organization?.plan || 'free'} Plan`}
+                                            {organization?.plan || 'free'} Plan
                                         </h3>
-                                        {selfHosted && <span style={{ padding: '2px 8px', backgroundColor: 'rgba(255,255,255,0.2)', fontSize: '12px', borderRadius: '12px', fontWeight: '600' }}>SELF-HOSTED</span>}
-                                        {!selfHosted && organization?.plan === 'beta' && <span style={{ padding: '2px 8px', backgroundColor: 'rgba(255,255,255,0.2)', fontSize: '12px', borderRadius: '12px', fontWeight: '600' }}>BETA</span>}
-                                        {!selfHosted && (organization?.isStripeSubscriptionCanceled && organization?.plan !== 'free') && <span style={{ padding: '2px 8px', backgroundColor: '#ef4444', color: 'white', fontSize: '10px', borderRadius: '12px', fontWeight: '600', textTransform: 'uppercase' }}>{t('settings.status.downgrading', 'En cours de modification')}</span>}
+                                        {organization?.plan === 'beta' && <span style={{ padding: '2px 8px', backgroundColor: 'rgba(255,255,255,0.2)', fontSize: '12px', borderRadius: '12px', fontWeight: '600' }}>BETA</span>}
+                                        {(organization?.isStripeSubscriptionCanceled && organization?.plan !== 'free') && <span style={{ padding: '2px 8px', backgroundColor: '#ef4444', color: 'white', fontSize: '10px', borderRadius: '12px', fontWeight: '600', textTransform: 'uppercase' }}>{t('settings.status.downgrading', 'En cours de modification')}</span>}
                                     </div>
                                     <p style={{ margin: 0, opacity: 0.85, fontSize: '15px' }}>
-                                        {selfHosted && 'Instance self-hosted : billing desactive, quotas desactives, limites illimitees.'}
-                                        {!selfHosted && organization?.plan === 'pro' && t('settings.proPlanDetails', 'Inclus : Jusqu\'à {{spools}} bobines et {{users}} utilisateurs.', { spools: organization?.stats?.limits?.maxSpoolsPerOrg || 50, users: organization?.stats?.limits?.maxMembersPerOrg || 20 })}
-                                        {!selfHosted && organization?.plan === 'free' && (
+                                        {organization?.plan === 'pro' && t('settings.proPlanDetails', 'Inclus : Jusqu\'à {{spools}} bobines et {{users}} utilisateurs.', { spools: organization?.stats?.limits?.maxSpoolsPerOrg || 50, users: organization?.stats?.limits?.maxMembersPerOrg || 20 })}
+                                        {organization?.plan === 'free' && (
                                             <>
                                                 {t('settings.freePlanDetails', 'Inclus : Jusqu\'à {{spools}} bobines et {{users}} utilisateurs.', { spools: organization?.stats?.limits?.maxSpoolsPerOrg || 10, users: organization?.stats?.limits?.maxMembersPerOrg || 3 })}
                                                 <br />
                                                 <strong style={{ color: '#fbbf24' }}>🎁 14 jours d'essai gratuits sur les plans Pro et Enterprise !</strong>
                                             </>
                                         )}
-                                        {!selfHosted && organization?.plan === 'beta' && t('settings.betaPlanDetails', 'Plan Beta')}
-                                        {!selfHosted && organization?.plan === 'enterprise' && t('settings.enterprisePlanDetails', 'Inclus : Bobines et utilisateurs illimités.')}
+                                        {organization?.plan === 'beta' && t('settings.betaPlanDetails', 'Plan Beta')}
+                                        {organization?.plan === 'enterprise' && t('settings.enterprisePlanDetails', 'Inclus : Bobines et utilisateurs illimités.')}
 
-                                        {!selfHosted && (organization?.trialEndsAt || organization?.stripeSubscriptionEndDate || organization?.manualPlanEndDate) && (
+                                        {(organization?.trialEndsAt || organization?.stripeSubscriptionEndDate || organization?.manualPlanEndDate) && (
                                             <div style={{ marginTop: '12px', fontSize: '13px', background: 'rgba(255,255,255,0.1)', padding: '6px 12px', borderRadius: '8px', display: 'inline-block' }}>
                                                 📅 {t('admin.manualPlanEndDate')}: {new Date(organization.trialEndsAt || organization.stripeSubscriptionEndDate || organization.manualPlanEndDate).toLocaleDateString()}
                                             </div>
@@ -955,7 +942,7 @@ export default function SettingsPage() {
                                     </p>
                                 </div>
 
-                                {!selfHosted && isAdminOrOwner && (
+                                {isAdminOrOwner && (
                                     <div style={{ display: 'flex', gap: '8px' }}>
                                     {organization?.plan === 'free' && (
                                         <>
@@ -1093,7 +1080,7 @@ export default function SettingsPage() {
                             )}
                         </div>
 
-                            {!selfHosted && (organization?.isStripeSubscriptionCanceled && organization?.plan !== 'free') && organization?.stripeSubscriptionEndDate && (
+                            {(organization?.isStripeSubscriptionCanceled && organization?.plan !== 'free') && organization?.stripeSubscriptionEndDate && (
                                 <div style={{
                                     backgroundColor: 'rgba(239, 68, 68, 0.15)',
                                     border: '1px solid rgba(239, 68, 68, 0.3)',
@@ -1164,7 +1151,7 @@ export default function SettingsPage() {
                                 </div>
                             )}
                         </div>
-                        {!selfHosted && isAdminOrOwner && (
+                        {isAdminOrOwner && (
                             <>
                                 <SubscriptionHistory organizationId={currentOrgId} refreshTrigger={historyRefreshKey} />
                             </>

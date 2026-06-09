@@ -32,7 +32,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ConsumptionLog, Filament } from '../api';
-import { api, BASE_URL } from '../api';
+import { api } from '../api';
 import AnalyticsCard from '../components/AnalyticsCard';
 import { AiInsightBanner } from '../components/AiInsightBanner';
 import ColorIndicator from '../components/ColorIndicator';
@@ -40,7 +40,6 @@ import DashboardChart from '../components/DashboardChart';
 import StockGauge from '../components/StockGauge';
 import { useAuth } from '../contexts/AuthContext';
 import { checkIsLowStock, getFilamentTitle } from '../utils/filament-utils';
-import { isSelfHostedMode } from '../config';
 
 
 
@@ -49,7 +48,6 @@ export default function DashboardPage() {
     const { t } = useTranslation();
     const { user, isLoading: authLoading } = useAuth();
     const theme = useTheme();
-    const selfHosted = isSelfHostedMode();
     const [filaments, setFilaments] = useState<Filament[]>([]);
     const [history, setHistory] = useState<ConsumptionLog[]>([]);
     const [loading, setLoading] = useState(true);
@@ -77,6 +75,9 @@ export default function DashboardPage() {
                 api.getAll(),
                 api.getAllConsumptionHistory(),
                 api.getOrgData(orgId)
+                // fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/organizations/${orgId}`, {
+                //     headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`,'x-organization-id': orgId }
+                // }).then(res => res.json()).catch(() => null)
             ]);
             setFilaments(filamentsData || []);
             // Support both array (old) and object (new) format
@@ -85,14 +86,14 @@ export default function DashboardPage() {
                 setRestricted(false);
             } else if (historyData && Array.isArray((historyData as any).logs)) {
                 setHistory((historyData as any).logs);
-                setRestricted(selfHosted ? false : (historyData as any).restricted === true);
+                setRestricted((historyData as any).restricted === true);
             } else {
                 setHistory([]);
                 setRestricted(false);
             }
             setOrganization(orgData);
             if (orgData?.plan) {
-                const isEligible = selfHosted || orgData.plan === 'pro' || orgData.plan === 'enterprise' || orgData.plan === 'beta' || Boolean(orgData.trialEndsAt && new Date(orgData.trialEndsAt) > new Date());
+                const isEligible = orgData.plan === 'pro' || orgData.plan === 'enterprise' || orgData.plan === 'beta' || Boolean(orgData.trialEndsAt && new Date(orgData.trialEndsAt) > new Date());
                 localStorage.setItem('organization_plan', isEligible ? 'pro' : 'free');
             }
         } catch (error) {
@@ -593,13 +594,13 @@ export default function DashboardPage() {
                             }}>
                                 <Typography variant="h6" fontWeight="bold">{t('dashboard.proFeature', '👑 Fonctionnalité Pro')}</Typography>
                                 <Typography variant="body2" color="text.secondary">{t('dashboard.upgradeToProRisk', 'Passez au plan Pro pour l\'analyse de risque IA.')}</Typography>
-                                {!selfHosted && !organization?.trialEndsAt && (
+                                {!organization?.trialEndsAt && (
                                     <Button
                                         variant="contained"
                                         color="primary"
                                         onClick={async () => {
                                             try {
-                                                const res = await fetch(`${BASE_URL}/stripe/create-checkout-session`, {
+                                                const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/stripe/create-checkout-session`, {
                                                     method: 'POST',
                                                     headers: {
                                                         'Content-Type': 'application/json',
