@@ -1,6 +1,7 @@
 
 const { NFC } = require('nfc-pcsc');
 const WebSocket = require('ws');
+const { readBambuRfidTag } = require('./bambu-rfid');
 
 // Configuration
 const WS_PORT = 8999;
@@ -73,6 +74,24 @@ try {
                 if (!finalUid) {
                     broadcast({ type: 'error', message: 'Could not read UID. Aborting memory read.' });
                     return;
+                }
+
+                try {
+                    broadcast({ type: 'log', message: 'Trying Bambu Lab RFID read...' });
+                    const bambu = await readBambuRfidTag(reader, finalUid);
+                    broadcast({ type: 'log', message: `Bambu Lab RFID detected: ${bambu.materialId || 'unknown material'}` });
+                    broadcast({
+                        type: 'tag_read',
+                        uid: bambu.tagId,
+                        atr: atr,
+                        source: 'bambu',
+                        bambu
+                    });
+                    return;
+                } catch (e) {
+                    const msg = `Not a readable Bambu RFID tag (${e.message}). Trying TigerTag...`;
+                    console.log(msg);
+                    broadcast({ type: 'log', message: msg });
                 }
 
                 // 2. STABILITY DELAY

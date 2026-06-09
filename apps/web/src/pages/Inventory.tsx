@@ -569,6 +569,11 @@ export default function InventoryPage() {
                 nozzleTempMax: Number(searchParams.get('initialNozzleMax')) || undefined,
                 bedTempMin: Number(searchParams.get('initialBedMin')) || undefined,
                 bedTempMax: Number(searchParams.get('initialBedMax')) || undefined,
+                weightInitial: Number(searchParams.get('initialWeight')) || undefined,
+                weightRemaining: Number(searchParams.get('initialWeightRemaining')) || undefined,
+                dryTemp: Number(searchParams.get('initialDryTemp')) || undefined,
+                dryTime: Number(searchParams.get('initialDryTime')) || undefined,
+                diameterMm: Number(searchParams.get('initialDiameter')) || undefined,
 
                 tigerBrandId: Number(searchParams.get('tigerBrandId')) || undefined,
                 tigerMaterialId: Number(searchParams.get('tigerMaterialId')) || undefined,
