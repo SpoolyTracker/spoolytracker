@@ -86,7 +86,12 @@
                 if (data.uid && typeof data.uid === 'object') {
                     uidStr = Buffer.from(data.uid).toString('hex').toUpperCase();
                 }
-                log(`Tag Scanned: ${uidStr}`);
+                if (data.source === 'bambu' && data.bambu) {
+                    const material = data.bambu.detailedFilamentType || data.bambu.filamentType || data.bambu.materialId || 'unknown material';
+                    log(`Bambu Lab RFID Scanned: ${uidStr} (${material})`);
+                } else {
+                    log(`Tag Scanned: ${uidStr}`);
+                }
             } else if (data.type === 'error') {
                 log(`Error: ${data.message}`);
             } else if (data.type === 'log') {
