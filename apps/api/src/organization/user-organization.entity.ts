@@ -22,6 +22,11 @@ export class UserOrganization {
   @Column({ default: true })
   hasConfirmed: boolean;
 
+  // Activation des alertes IA proactives pour CE membre sur CETTE organisation
+  // (permet de couper les notifs d'une org sans quitter l'org).
+  @Column({ default: true })
+  notifyOnAiAlerts: boolean;
+
   @Column({
     type: 'enum',
     enum: ['owner', 'admin', 'member'],

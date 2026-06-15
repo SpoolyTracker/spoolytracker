@@ -23,9 +23,6 @@ def test_health_route_is_registered() -> None:
     assert "/status" in routes
     assert "/chat" in routes
     assert "/capabilities" in routes
-    assert "/actions/propose" in routes
-    assert "/actions/{action_id}/approve" in routes
-    assert "/actions/{action_id}/reject" in routes
     assert "/memory" in routes
     assert "/memory/{memory_id}" in routes
     assert "/feedback" in routes

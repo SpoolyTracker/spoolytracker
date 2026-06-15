@@ -17,6 +17,7 @@ import {
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { CreateProjectExternalItemDto } from './dto/create-project-external-item.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OrganizationGuard } from '../common/organization.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -90,6 +91,52 @@ export class ProjectsController {
   ) {
     req.user.organizationId = req.organizationId;
     return this.projectsService.removeItem(+id, +itemId, req.user);
+  }
+
+  @Patch(':id/items/:itemId')
+  updateItem(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() data: any,
+  ) {
+    req.user.organizationId = req.organizationId;
+    return this.projectsService.updateItem(+id, +itemId, data, req.user);
+  }
+
+  @Post(':id/external-items')
+  addExternalItem(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() createProjectExternalItemDto: CreateProjectExternalItemDto,
+  ) {
+    req.user.organizationId = req.organizationId;
+    return this.projectsService.addExternalItem(
+      +id,
+      createProjectExternalItemDto,
+      req.user,
+    );
+  }
+
+  @Delete(':id/external-items/:itemId')
+  removeExternalItem(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+  ) {
+    req.user.organizationId = req.organizationId;
+    return this.projectsService.removeExternalItem(+id, +itemId, req.user);
+  }
+
+  @Patch(':id/external-items/:itemId')
+  updateExternalItem(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() data: Partial<CreateProjectExternalItemDto>,
+  ) {
+    req.user.organizationId = req.organizationId;
+    return this.projectsService.updateExternalItem(+id, +itemId, data, req.user);
   }
 
   @Post(':id/files')

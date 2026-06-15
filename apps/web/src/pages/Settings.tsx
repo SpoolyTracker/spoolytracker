@@ -41,7 +41,7 @@ export default function SettingsPage() {
     const currentOrgId = localStorage.getItem('organization_id') || '1';
     const [activeTab, setActiveTab] = useState<'organization' | 'members' | 'profile' | 'integrations' | 'downloads' | 'notifications'>('organization');
     const [organization, setOrganization] = useState<any>(null);
-    const [orgSettings, setOrgSettings] = useState<{ lowStockThreshold: number | null, lowStockThresholdType: string }>({ lowStockThreshold: null, lowStockThresholdType: 'GRAMS' });
+    const [orgSettings, setOrgSettings] = useState<{ lowStockThreshold: number | null, lowStockThresholdType: string, aiAlertCooldownHours?: number | null }>({ lowStockThreshold: null, lowStockThresholdType: 'GRAMS' });
     const [saving, setSaving] = useState(false);
     const [upgrading, setUpgrading] = useState(false);
     const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -112,8 +112,30 @@ export default function SettingsPage() {
         notifyOnSystem: user?.notifyOnSystem ?? true,
         notifyOnLowStock: user?.notifyOnLowStock ?? true,
         notifyOnInvitation: user?.notifyOnInvitation ?? true,
+        notifyOnAiRupture: user?.notifyOnAiRupture ?? true,
+        notifyOnAiAchat: user?.notifyOnAiAchat ?? true,
+        notifyOnAiProjet: user?.notifyOnAiProjet ?? true,
     });
     const [showProfilePassword, setShowProfilePassword] = useState(false);
+    const currentOrg = user?.organisations?.find((o) => String(o.id) === String(currentOrgId));
+    const [orgAiAlertsEnabled, setOrgAiAlertsEnabled] = useState(currentOrg?.notifyOnAiAlerts ?? true);
+    const handleToggleOrgAiAlerts = async (enabled: boolean) => {
+        setOrgAiAlertsEnabled(enabled);
+        try {
+            await api.setOrgAiAlertsPreference(Number(currentOrgId), enabled);
+            updateUser({
+                organisations: (user?.organisations || []).map((o) =>
+                    String(o.id) === String(currentOrgId) ? { ...o, notifyOnAiAlerts: enabled } : o,
+                ),
+            });
+        } catch (error: any) {
+            setOrgAiAlertsEnabled(!enabled); // rollback en cas d'echec
+            alert(
+                'Impossible de mettre à jour ce réglage. Vérifie que le serveur API a été redémarré et que la migration a été appliquée.\n\nDétail: ' +
+                    (error?.message || 'erreur inconnue'),
+            );
+        }
+    };
     const [deleteAccountModal, setDeleteAccountModal] = useState(false);
     const [deleteConfirmWord, setDeleteConfirmWord] = useState('');
     const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
@@ -167,7 +189,12 @@ export default function SettingsPage() {
                 notifyOnSystem: user.notifyOnSystem ?? true,
                 notifyOnLowStock: user.notifyOnLowStock ?? true,
                 notifyOnInvitation: user.notifyOnInvitation ?? true,
+                notifyOnAiRupture: user.notifyOnAiRupture ?? true,
+                notifyOnAiAchat: user.notifyOnAiAchat ?? true,
+                notifyOnAiProjet: user.notifyOnAiProjet ?? true,
             });
+            const org = user.organisations?.find((o) => String(o.id) === String(currentOrgId));
+            setOrgAiAlertsEnabled(org?.notifyOnAiAlerts ?? true);
         }
     }, [user]);
 
@@ -191,6 +218,9 @@ export default function SettingsPage() {
                     notifyOnSystem: profileData.notifyOnSystem,
                     notifyOnLowStock: profileData.notifyOnLowStock,
                     notifyOnInvitation: profileData.notifyOnInvitation,
+                    notifyOnAiRupture: profileData.notifyOnAiRupture,
+                    notifyOnAiAchat: profileData.notifyOnAiAchat,
+                    notifyOnAiProjet: profileData.notifyOnAiProjet,
                     ...(profileData.newPassword ? { password: profileData.newPassword } : {})
                 })
             });
@@ -808,6 +838,24 @@ export default function SettingsPage() {
 
                     <div style={{ marginBottom: '24px' }}>
                         <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+                            Délai anti-répétition des alertes IA (heures)
+                        </label>
+                        <input
+                            type="number"
+                            min={1}
+                            placeholder="72"
+                            value={orgSettings.aiAlertCooldownHours == null ? '' : orgSettings.aiAlertCooldownHours}
+                            onChange={(e) => setOrgSettings(prev => ({ ...prev, aiAlertCooldownHours: e.target.value === '' ? null : Number(e.target.value) }))}
+                            disabled={!isAdminOrOwner}
+                            style={{ width: '120px', padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
+                        />
+                        <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
+                            Une même alerte IA n'est pas renvoyée avant ce délai (sauf aggravation). Vide = valeur par défaut (72h).
+                        </p>
+                    </div>
+
+                    <div style={{ marginBottom: '24px' }}>
+                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
                             {t('settings.organizationLogo') || "Organization Logo"}
                         </label>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -923,10 +971,10 @@ export default function SettingsPage() {
                                         {(organization?.isStripeSubscriptionCanceled && organization?.plan !== 'free') && <span style={{ padding: '2px 8px', backgroundColor: '#ef4444', color: 'white', fontSize: '10px', borderRadius: '12px', fontWeight: '600', textTransform: 'uppercase' }}>{t('settings.status.downgrading', 'En cours de modification')}</span>}
                                     </div>
                                     <p style={{ margin: 0, opacity: 0.85, fontSize: '15px' }}>
-                                        {organization?.plan === 'pro' && t('settings.proPlanDetails', 'Inclus : Jusqu\'à {{spools}} bobines et {{users}} utilisateurs.', { spools: organization?.stats?.limits?.maxSpoolsPerOrg || 50, users: organization?.stats?.limits?.maxMembersPerOrg || 20 })}
+                                        {organization?.plan === 'pro' && t('settings.proPlanDetails', 'Inclus : Jusqu\'à {{spools}} bobines et {{users}} utilisateurs.', { spools: organization?.stats?.limits?.maxSpoolsPerOrg || 100, users: organization?.stats?.limits?.maxMembersPerOrg || 20 })}
                                         {organization?.plan === 'free' && (
                                             <>
-                                                {t('settings.freePlanDetails', 'Inclus : Jusqu\'à {{spools}} bobines et {{users}} utilisateurs.', { spools: organization?.stats?.limits?.maxSpoolsPerOrg || 10, users: organization?.stats?.limits?.maxMembersPerOrg || 3 })}
+                                                {t('settings.freePlanDetails', 'Inclus : Jusqu\'à {{spools}} bobines, analytics inclus, et {{users}} utilisateurs.', { spools: organization?.stats?.limits?.maxSpoolsPerOrg || 30, users: organization?.stats?.limits?.maxMembersPerOrg || 3 })}
                                                 <br />
                                                 <strong style={{ color: '#fbbf24' }}>🎁 14 jours d'essai gratuits sur les plans Pro et Enterprise !</strong>
                                             </>
@@ -1755,6 +1803,58 @@ export default function SettingsPage() {
                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                                 <span style={{ fontWeight: '600', color: '#111827' }}>Invitations d'Organisation</span>
                                 <span style={{ fontSize: '13px', color: '#6b7280' }}>Recevoir une alerte lorsque vous êtes invité à rejoindre une nouvelle communauté/entreprise.</span>
+                            </div>
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                            <input
+                                type="checkbox"
+                                checked={profileData.notifyOnAiRupture}
+                                onChange={(e) => setProfileData(prev => ({ ...prev, notifyOnAiRupture: e.target.checked }))}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#6366f1' }}
+                            />
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: '600', color: '#111827' }}>Alerte IA · Rupture imminente</span>
+                                <span style={{ fontSize: '13px', color: '#6b7280' }}>L'assistant vous prévient lorsqu'une bobine va bientôt être en rupture.</span>
+                            </div>
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                            <input
+                                type="checkbox"
+                                checked={profileData.notifyOnAiAchat}
+                                onChange={(e) => setProfileData(prev => ({ ...prev, notifyOnAiAchat: e.target.checked }))}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#6366f1' }}
+                            />
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: '600', color: '#111827' }}>Alerte IA · Achat à prévoir</span>
+                                <span style={{ fontSize: '13px', color: '#6b7280' }}>Recevoir une suggestion de commande quand un réapprovisionnement devient urgent.</span>
+                            </div>
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                            <input
+                                type="checkbox"
+                                checked={profileData.notifyOnAiProjet}
+                                onChange={(e) => setProfileData(prev => ({ ...prev, notifyOnAiProjet: e.target.checked }))}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#6366f1' }}
+                            />
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: '600', color: '#111827' }}>Alerte IA · Projet à risque</span>
+                                <span style={{ fontSize: '13px', color: '#6b7280' }}>Être averti lorsqu'un projet planifié n'a plus assez de stock pour ses besoins.</span>
+                            </div>
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', padding: '12px', backgroundColor: '#eef2ff', borderRadius: '8px', border: '1px solid #c7d2fe' }}>
+                            <input
+                                type="checkbox"
+                                checked={orgAiAlertsEnabled}
+                                onChange={(e) => handleToggleOrgAiAlerts(e.target.checked)}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#6366f1' }}
+                            />
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: '600', color: '#111827' }}>Alertes IA pour « {currentOrg?.name || 'cette organisation'} »</span>
+                                <span style={{ fontSize: '13px', color: '#6b7280' }}>Coupe toutes les alertes IA de l'organisation actuellement sélectionnée (pour en régler une autre, sélectionne-la d'abord).</span>
                             </div>
                         </label>
                     </div>

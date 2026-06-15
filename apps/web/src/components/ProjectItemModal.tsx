@@ -3,10 +3,10 @@ import { useState, useEffect } from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, TextField, Autocomplete, Box, Typography,
-    InputAdornment
+    InputAdornment, FormControlLabel, Checkbox
 } from '@mui/material';
 import { api } from '../api';
-import type { Filament } from '../api';
+import type { Filament, ProjectItem } from '../api';
 import { useTranslation } from 'react-i18next';
 import { getFilamentTitle } from '../utils/filament-utils';
 import { normalizeNumericInput } from '../utils/number-utils';
@@ -16,22 +16,26 @@ interface ProjectItemModalProps {
     onClose: () => void;
     projectId: number;
     onSuccess: () => void;
+    item?: ProjectItem | null;
 }
 
-export default function ProjectItemModal({ open, onClose, projectId, onSuccess }: ProjectItemModalProps) {
+export default function ProjectItemModal({ open, onClose, projectId, onSuccess, item }: ProjectItemModalProps) {
     const { t } = useTranslation();
     const [loading, setLoading] = useState(false);
     const [filaments, setFilaments] = useState<Filament[]>([]);
     const [selectedFilament, setSelectedFilament] = useState<Filament | null>(null);
     const [weight, setWeight] = useState<number | string>(0);
+    const [createPlannedConsumption, setCreatePlannedConsumption] = useState(true);
+    const isEditing = Boolean(item);
 
     useEffect(() => {
         if (open) {
             loadFilaments();
-            setWeight(0);
-            setSelectedFilament(null);
+            setWeight(item?.weight_required_g || 0);
+            setSelectedFilament(item?.filament || null);
+            setCreatePlannedConsumption(!item);
         }
-    }, [open]);
+    }, [open, item]);
 
     const loadFilaments = async () => {
         try {
@@ -47,10 +51,27 @@ export default function ProjectItemModal({ open, onClose, projectId, onSuccess }
 
         try {
             setLoading(true);
-            await api.addProjectItem(projectId, {
-                filamentId: selectedFilament.id,
-                weight_required_g: weight
-            });
+            if (item) {
+                await api.updateProjectItem(projectId, item.id, {
+                    filamentId: selectedFilament.id,
+                    weight_required_g: Number(weight)
+                });
+            } else {
+                await api.addProjectItem(projectId, {
+                    filamentId: selectedFilament.id,
+                    weight_required_g: Number(weight)
+                });
+
+                if (createPlannedConsumption) {
+                    await api.addProjectConsumption(projectId, {
+                        filamentId: selectedFilament.id,
+                        amount: Number(weight),
+                        type: 'PRINT',
+                        isPlanned: true,
+                        notes: t('projects.bomPlannedConsumptionNote', 'Planned from project BOM')
+                    });
+                }
+            }
             onSuccess();
             onClose();
         } catch (error) {
@@ -62,7 +83,7 @@ export default function ProjectItemModal({ open, onClose, projectId, onSuccess }
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-            <DialogTitle>{t('projects.addMaterial', 'Add Material')}</DialogTitle>
+            <DialogTitle>{isEditing ? t('projects.editMaterial', 'Edit Material') : t('projects.addMaterial', 'Add Material')}</DialogTitle>
             <DialogContent>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}>
                     <Autocomplete
@@ -116,6 +137,24 @@ export default function ProjectItemModal({ open, onClose, projectId, onSuccess }
                         }}
                         helperText={selectedFilament ? `Est. Cost: ${((Number(weight) / selectedFilament.weightInitial) * (selectedFilament.price || 0)).toFixed(2)}€` : ''}
                     />
+                    {!isEditing && (
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={createPlannedConsumption}
+                                    onChange={(e) => setCreatePlannedConsumption(e.target.checked)}
+                                />
+                            }
+                            label={
+                                <Box>
+                                    <Typography variant="body2">{t('projects.createPlannedConsumption', 'Add as planned consumption')}</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        {t('projects.createPlannedConsumptionHint', 'Reserves this quantity without deducting real stock yet.')}
+                                    </Typography>
+                                </Box>
+                            }
+                        />
+                    )}
                 </Box>
             </DialogContent>
             <DialogActions>
@@ -125,7 +164,7 @@ export default function ProjectItemModal({ open, onClose, projectId, onSuccess }
                     variant="contained"
                     disabled={!selectedFilament || Number(weight) <= 0 || loading}
                 >
-                    {t('common.add')}
+                    {isEditing ? t('common.save') : t('common.add')}
                 </Button>
             </DialogActions>
         </Dialog>

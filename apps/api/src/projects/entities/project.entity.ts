@@ -12,6 +12,7 @@ import { User } from '../../auth/user.entity';
 import { Organization } from '../../organization/organization.entity';
 import { ProjectItem } from './project-item.entity';
 import { ProjectFile } from './project-file.entity';
+import { ProjectExternalItem } from './project-external-item.entity';
 import { ConsumptionLog } from '../../filament/consumption-log.entity';
 
 export enum ProjectStatus {
@@ -100,6 +101,9 @@ export class Project {
   })
   electricity_cost_kwh: number;
 
+  @Column({ type: 'jsonb', nullable: true })
+  overhead_rates: Array<{ label: string; percentage: number }>;
+
   @Column({ type: 'text', nullable: true })
   notes: string;
 
@@ -116,6 +120,11 @@ export class Project {
 
   @OneToMany(() => ProjectItem, (item) => item.project, { cascade: true })
   items: ProjectItem[];
+
+  @OneToMany(() => ProjectExternalItem, (item) => item.project, {
+    cascade: true,
+  })
+  externalItems: ProjectExternalItem[];
 
   @OneToMany(() => ProjectFile, (file) => file.project, { cascade: true })
   files: ProjectFile[];

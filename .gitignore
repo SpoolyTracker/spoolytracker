@@ -57,3 +57,6 @@ apps/api/logs/
 # Local AI engine runtime
 apps/ai-engine/*.sqlite3
 apps/ai-engine/.pytest_cache/
+
+# Brainstorming visual companion
+.superpowers/

@@ -1,6 +1,6 @@
 [project]
 name = "spooly-ai-engine"
-version = "0.1.0"
+version = "0.1.4"
 description = "Standalone FastAPI AI engine for Spooly."
 requires-python = ">=3.11"
 dependencies = [

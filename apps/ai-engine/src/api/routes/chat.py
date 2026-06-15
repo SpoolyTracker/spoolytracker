@@ -1,14 +1,26 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from src.agents.free_assistant import FreeAssistantAgent
 from src.api.schemas import Capability, CapabilitiesResponse, ChatRequest, ChatResponse
+from src.domain.snapshots import AppDataSnapshot
+from src.forecasting.depletion import ForecastingService
 from src.forecasting.factory import forecasting_factory
 from src.llm.service import LLMService, llm_service
 from src.memory.service import MemoryService, memory_service
+from src.replenishment.service import ReplenishmentService
 from src.security.context import RequestContext, get_optional_request_context
 from src.security.plan import PlanContext, get_plan_context
 
 router = APIRouter(tags=["assistant"])
+
+
+def _build_forecast_service(
+    request: ChatRequest, context: RequestContext | None
+) -> ForecastingService:
+    if request.snapshot:
+        snapshot = AppDataSnapshot.model_validate(request.snapshot)
+        return ForecastingService.from_snapshot(snapshot, source="main_api")
+    return forecasting_factory.build(context)
 
 
 def get_memory_service() -> MemoryService:
@@ -26,28 +38,38 @@ async def chat(
     plan: PlanContext = Depends(get_plan_context),
     service: MemoryService = Depends(get_memory_service),
     llm: LLMService = Depends(get_llm_service),
+    country: str | None = Header(default=None, alias="x-country-code"),
 ) -> ChatResponse:
+    if not isinstance(country, str):
+        country = None
     if not hasattr(service, "capture_from_chat"):
         service = memory_service
     if not hasattr(llm, "enhance_answer"):
         llm = llm_service
 
-    if context:
-        captured = service.capture_from_chat(request.message, context)
-        if captured:
-            return ChatResponse(
-                intent="memory_saved",
-                answer="C'est note. J'utiliserai cette information pour ameliorer mes prochaines reponses.",
-                data={"memory": captured.model_dump()},
-            )
+    captured = service.capture_from_chat(request.message, context) if context else None
+    if captured:
+        return ChatResponse(
+            intent="memory_saved",
+            answer="C'est note. J'utiliserai cette information pour ameliorer mes prochaines reponses.",
+            data={"captured_memory": captured.model_dump(), "memory": captured.model_dump()},
+        )
+
+    if request.snapshot and isinstance(request.snapshot.get("memories"), list):
+        memories = request.snapshot["memories"]
+    elif context:
         memories = [memory.model_dump() for memory in service.search(context, request.message)]
     else:
         memories = []
 
-    if plan.is_pro and _is_pro_forecast_question(request.message):
-        forecast_service = forecasting_factory.build(context)
+    if plan.is_pro and (
+        _is_purchase_question(request.message) or _is_pro_forecast_question(request.message)
+    ):
+        forecast_service = _build_forecast_service(request, context)
         lower = request.message.lower()
         include_empty = "bobine vide" in lower or "bobines vides" in lower or "stock vide" in lower
+        if _is_purchase_question(request.message):
+            return _build_purchase_response(request, forecast_service, country)
         if "notification" in lower:
             proposals = forecast_service.notification_proposals(include_empty=include_empty)
             return ChatResponse(
@@ -103,7 +125,7 @@ async def chat(
             data={"forecasts": [forecast.model_dump() for forecast in forecasts], "source": forecast_service.data_source},
         )
 
-    forecast_service = forecasting_factory.build(context)
+    forecast_service = _build_forecast_service(request, context)
     result = await FreeAssistantAgent().run(
         prompt=request.message,
         context={
@@ -116,6 +138,7 @@ async def chat(
         },
     )
     response = ChatResponse(**result.model_dump())
+    response.data = {**(response.data or {}), "memories": memories}
     return _with_optional_llm_response(response, request.message, memories, llm)
 
 
@@ -145,6 +168,104 @@ def _is_pro_forecast_question(message: str) -> bool:
 
 def _is_risk_follow_up(message: str) -> bool:
     return any(token in message for token in ["les indiquer", "me les indiquer", "detail", "détail"])
+
+
+def _is_purchase_question(message: str) -> bool:
+    lower = message.lower()
+    return any(
+        token in lower
+        for token in [
+            "commande",
+            "commander",
+            "acheter",
+            "a acheter",
+            "à acheter",
+            "achat",
+            "racheter",
+            "approvision",
+            "ravitail",
+            "liste de courses",
+            "a prevoir",
+            "à prévoir",
+            "quoi prendre",
+        ]
+    )
+
+
+def _build_purchase_response(
+    request: ChatRequest,
+    forecast_service: ForecastingService,
+    country: str | None,
+) -> ChatResponse:
+    lower = request.message.lower()
+    include_empty = "bobine vide" in lower or "bobines vides" in lower or "stock vide" in lower
+    recommendations = forecast_service.purchase_recommendations(include_empty=include_empty)
+
+    replenishment = ReplenishmentService(forecast_service.stock_items)
+
+    enriched: list[dict] = []
+    for recommendation in recommendations:
+        data = recommendation.model_dump()
+        try:
+            suggestion = replenishment.suggest_for_item(
+                recommendation.item_id, country=country, max_results=8
+            )
+        except ValueError:
+            suggestion = None
+
+        providers: list[dict] = []
+        if suggestion:
+            seen_providers: set[str] = set()
+            for option in suggestion.suggestions:
+                if option.provider_id in seen_providers:
+                    continue
+                seen_providers.add(option.provider_id)
+                providers.append(
+                    {
+                        "provider_id": option.provider_id,
+                        "provider_name": option.provider_name,
+                        "url": option.url,
+                    }
+                )
+                if len(providers) >= 3:
+                    break
+
+        data["providers"] = providers
+        if providers:
+            # Keep single-provider fields for backward compatibility.
+            data["provider_name"] = providers[0]["provider_name"]
+            data["provider_url"] = providers[0]["url"]
+        enriched.append(data)
+
+    if not enriched:
+        answer = (
+            "Rien d'urgent a commander pour l'instant: aucune bobine en rupture proche "
+            "ni en stock faible."
+            f"\n\nSource des donnees: {forecast_service.data_source}."
+        )
+    else:
+        lines = []
+        for data in enriched:
+            tag = "URGENT" if data["urgency"] == "immediate" else "a prevoir"
+            lines.append(
+                f"- [{tag}] {data['item_name']}: {data['reason']} "
+                f"Suggere: {data['suggested_quantity_kg']} kg."
+            )
+        answer = (
+            f"Voici les commandes a prevoir ({len(enriched)}):\n"
+            + "\n".join(lines)
+            + f"\n\nSource des donnees: {forecast_service.data_source}."
+        )
+
+    return ChatResponse(
+        intent="pro_purchase_recommendations",
+        answer=answer,
+        data={
+            "recommendations": enriched,
+            "country": country,
+            "source": forecast_service.data_source,
+        },
+    )
 
 
 def _with_optional_llm_response(

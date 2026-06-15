@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, Brain, CheckCircle2, Info, MessageSquare, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Bot, Brain, CheckCircle2, ExternalLink, Info, MessageSquare, Send, ShoppingCart, Sparkles, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import {
     Box,
@@ -15,9 +15,18 @@ import {
     TextField,
     Typography,
 } from '@mui/material';
-import { aiEngine, askAgent, type AiEngineCapabilities, type AiMemoryRecord } from '../api';
+import { aiActions, aiEngine, askAgent, type AiEngineCapabilities, type AiMemoryRecord } from '../api';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+
+interface GatewayAction {
+    id: string;
+    type: string;
+    label: string;
+    payload: Record<string, any>;
+    status: string;
+    result?: any;
+    failureReason?: string;
+}
 
 interface ChatMessage {
     id: string;
@@ -25,15 +34,11 @@ interface ChatMessage {
     content: string;
     intent?: string;
     isError?: boolean;
-    proposedActions?: Array<{
-        type: string;
-        label: string;
-        payload: Record<string, any>;
-        requires_confirmation?: boolean;
-    }>;
+    data?: {
+        actions?: GatewayAction[];
+        [key: string]: any;
+    };
 }
-
-type ProposedChatAction = NonNullable<ChatMessage['proposedActions']>[number];
 
 const INIT_MESSAGE: ChatMessage = {
     id: 'init-1',
@@ -58,14 +63,12 @@ const sanitizeAiDisplayContent = (content: string) => (
 
 export const AiChatWidget: React.FC = () => {
     const { token } = useAuth();
-    const navigate = useNavigate();
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [capabilities, setCapabilities] = useState<AiEngineCapabilities | null>(null);
     const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
-    const [actionStates, setActionStates] = useState<Record<string, 'idle' | 'loading' | 'approved' | 'rejected' | 'failed'>>({});
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -105,7 +108,7 @@ export const AiChatWidget: React.FC = () => {
                 role: 'agent',
                 content: res.answer || "Desole, je n'ai pas de reponse.",
                 intent: res.intent,
-                proposedActions: res.proposed_actions || [],
+                data: res.data,
             };
             setMessages(prev => [...prev, agentMsg]);
             if (res.intent === 'memory_saved') {
@@ -131,45 +134,36 @@ export const AiChatWidget: React.FC = () => {
         ? `LLM ${capabilities.llm.provider}${capabilities.llm.available ? '' : ' indisponible'}`
         : 'Moteur deterministe';
 
-    const handleApproveAction = async (messageId: string, actionIndex: number, action: ProposedChatAction) => {
-        const key = `${messageId}-${actionIndex}`;
-        if (action.type === 'create_project') {
-            const params = new URLSearchParams();
-            if (action.payload.name) params.set('name', String(action.payload.name));
-            if (action.payload.description) params.set('description', String(action.payload.description));
-            if (action.payload.filament_id) params.set('filamentId', String(action.payload.filament_id));
-            if (action.payload.amount_g) params.set('weightRequiredG', String(action.payload.amount_g));
-            params.set('source', 'ai');
-            navigate(`/projects/new?${params.toString()}`);
-            setIsOpen(false);
-            return;
-        }
+    const gatewayActionStatusLabel = (s: string) =>
+        s === 'executed' ? 'Execute' : s === 'rejected' ? 'Rejete' : s === 'failed' ? 'Echec' : s;
 
-        setActionStates(prev => ({ ...prev, [key]: 'loading' }));
+    const updateGatewayActionInState = (actionId: string, patch: Partial<Pick<GatewayAction, 'status' | 'result' | 'failureReason'>>) => {
+        setMessages(prev => prev.map(m => ({
+            ...m,
+            data: m.data?.actions
+                ? { ...m.data, actions: m.data.actions.map((a: GatewayAction) => a.id === actionId ? { ...a, ...patch } : a) }
+                : m.data,
+        })));
+    };
+
+    const handleGatewayApprove = async (id: string) => {
+        updateGatewayActionInState(id, { status: 'loading' });
         try {
-            const proposed = await aiEngine.proposeAction({
-                type: action.type,
-                title: action.label || `Action IA: ${action.type}`,
-                payload: action.payload,
-            });
-            await aiEngine.approveAction(proposed.id);
-            setActionStates(prev => ({ ...prev, [key]: 'approved' }));
-            setMessages(prev => [
-                ...prev,
-                {
-                    id: `${Date.now()}-action`,
-                    role: 'agent',
-                    content: "Action validee. Pour cette demo, l'execution reste mockee cote moteur IA.",
-                },
-            ]);
+            const updated = await aiActions.approve(id);
+            updateGatewayActionInState(id, { status: updated.status, result: updated.result, failureReason: updated.failureReason });
         } catch {
-            setActionStates(prev => ({ ...prev, [key]: 'failed' }));
+            updateGatewayActionInState(id, { status: 'failed' });
         }
     };
 
-    const handleRejectAction = (messageId: string, actionIndex: number) => {
-        const key = `${messageId}-${actionIndex}`;
-        setActionStates(prev => ({ ...prev, [key]: 'rejected' }));
+    const handleGatewayReject = async (id: string) => {
+        updateGatewayActionInState(id, { status: 'loading' });
+        try {
+            const updated = await aiActions.reject(id);
+            updateGatewayActionInState(id, { status: updated.status });
+        } catch {
+            updateGatewayActionInState(id, { status: 'rejected' });
+        }
     };
 
     return (
@@ -259,63 +253,137 @@ export const AiChatWidget: React.FC = () => {
                                                     }}
                                                 >
                                                     <ReactMarkdown>{sanitizeAiDisplayContent(msg.content)}</ReactMarkdown>
-                                                    {msg.proposedActions && msg.proposedActions.length > 0 && (
+                                                    {msg.data?.persistentIntelligence === false && (
+                                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                                            Passez en Pro pour que l'assistant retienne vos préférences et vos choix de bobines.
+                                                        </Typography>
+                                                    )}
+                                                    {Array.isArray(msg.data?.recommendations) && msg.data.recommendations.length > 0 && (
                                                         <Stack spacing={1} sx={{ mt: 1 }}>
-                                                    {msg.proposedActions.map((action, index) => {
-                                                        const key = `${msg.id}-${index}`;
-                                                        const state = actionStates[key] || 'idle';
-                                                        return (
-                                                            <Box
-                                                                key={`${action.type}-${index}`}
-                                                                sx={{
-                                                                    p: 1,
-                                                                    borderRadius: 2,
-                                                                    border: '1px solid',
-                                                                    borderColor: state === 'failed' ? 'error.light' : 'warning.light',
-                                                                    bgcolor: 'rgba(245, 158, 11, 0.06)',
-                                                                }}
-                                                            >
-                                                                <Stack spacing={1}>
-                                                                    <Stack direction="row" spacing={0.75} alignItems="center">
-                                                                        <CheckCircle2 size={15} />
-                                                                        <Typography variant="caption" fontWeight={800}>
-                                                                            {action.label || `Action proposee: ${action.type}`}
-                                                                        </Typography>
-                                                                    </Stack>
-                                                                    {state === 'approved' ? (
-                                                                        <Chip label="Validee" color="success" size="small" />
-                                                                    ) : state === 'rejected' ? (
-                                                                        <Chip label="Refusee" size="small" />
-                                                                    ) : state === 'failed' ? (
-                                                                        <Typography variant="caption" color="error">Impossible de valider cette action.</Typography>
-                                                                    ) : (
-                                                                        <Stack direction="row" spacing={1}>
-                                                                            <Button
+                                                            {msg.data.recommendations.map((rec: any, idx: number) => (
+                                                                <Box
+                                                                    key={rec.item_id || idx}
+                                                                    sx={{
+                                                                        p: 1,
+                                                                        borderRadius: 2,
+                                                                        border: '1px solid',
+                                                                        borderColor: rec.urgency === 'immediate' ? 'error.light' : 'divider',
+                                                                        bgcolor: rec.urgency === 'immediate' ? 'rgba(239, 68, 68, 0.06)' : 'rgba(15, 23, 42, 0.02)',
+                                                                    }}
+                                                                >
+                                                                    <Stack spacing={0.75}>
+                                                                        <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
+                                                                            <Typography variant="caption" fontWeight={800}>{rec.item_name}</Typography>
+                                                                            <Chip
+                                                                                label={rec.urgency === 'immediate' ? 'Urgent' : 'À prévoir'}
+                                                                                color={rec.urgency === 'immediate' ? 'error' : 'default'}
                                                                                 size="small"
-                                                                                variant="contained"
-                                                                                color={action.type === 'create_project' ? 'primary' : 'warning'}
-                                                                                disabled={state === 'loading'}
-                                                                                onClick={() => handleApproveAction(msg.id, index, action)}
-                                                                            >
-                                                                                {action.type === 'create_project' ? 'Ouvrir creation' : state === 'loading' ? 'Validation...' : 'Valider'}
-                                                                            </Button>
-                                                                            {action.type !== 'create_project' && (
+                                                                                sx={{ height: 20, fontSize: '0.66rem' }}
+                                                                            />
+                                                                        </Stack>
+                                                                        {rec.reason && (
+                                                                            <Typography variant="caption" color="text.secondary">{rec.reason}</Typography>
+                                                                        )}
+                                                                        {(() => {
+                                                                            const providers: Array<{ provider_name?: string; url?: string }> =
+                                                                                Array.isArray(rec.providers) && rec.providers.length > 0
+                                                                                    ? rec.providers
+                                                                                    : rec.provider_url
+                                                                                        ? [{ provider_name: rec.provider_name, url: rec.provider_url }]
+                                                                                        : [];
+                                                                            if (providers.length === 0) return null;
+                                                                            return (
+                                                                                <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', gap: 0.75 }}>
+                                                                                    {providers.map((provider, providerIdx) => provider.url && (
+                                                                                        <Button
+                                                                                            key={provider.url || providerIdx}
+                                                                                            size="small"
+                                                                                            variant={providerIdx === 0 ? 'contained' : 'outlined'}
+                                                                                            color="primary"
+                                                                                            startIcon={<ShoppingCart size={14} />}
+                                                                                            endIcon={<ExternalLink size={12} />}
+                                                                                            href={provider.url}
+                                                                                            target="_blank"
+                                                                                            rel="noopener noreferrer"
+                                                                                            sx={{ textTransform: 'none' }}
+                                                                                        >
+                                                                                            {provider.provider_name || 'Commander'}
+                                                                                        </Button>
+                                                                                    ))}
+                                                                                </Stack>
+                                                                            );
+                                                                        })()}
+                                                                    </Stack>
+                                                                </Box>
+                                                            ))}
+                                                        </Stack>
+                                                    )}
+                                                    {msg.data?.actions && msg.data.actions.length > 0 && (
+                                                        <Stack spacing={1} sx={{ mt: 1 }}>
+                                                            {msg.data.actions.map((action: GatewayAction) => (
+                                                                <Box
+                                                                    key={action.id}
+                                                                    sx={{
+                                                                        p: 1,
+                                                                        borderRadius: 2,
+                                                                        border: '1px solid',
+                                                                        borderColor: action.status === 'failed' ? 'error.light' : 'warning.light',
+                                                                        bgcolor: 'rgba(245, 158, 11, 0.06)',
+                                                                    }}
+                                                                >
+                                                                    <Stack spacing={1}>
+                                                                        <Stack direction="row" spacing={0.75} alignItems="center">
+                                                                            <CheckCircle2 size={15} />
+                                                                            <Typography variant="caption" fontWeight={800}>
+                                                                                {action.label || `Action: ${action.type}`}
+                                                                            </Typography>
+                                                                        </Stack>
+                                                                        {action.status === 'proposed' ? (
+                                                                            <Stack direction="row" spacing={1}>
+                                                                                <Button
+                                                                                    size="small"
+                                                                                    variant="contained"
+                                                                                    color="warning"
+                                                                                    onClick={() => handleGatewayApprove(action.id)}
+                                                                                >
+                                                                                    Valider
+                                                                                </Button>
                                                                                 <Button
                                                                                     size="small"
                                                                                     variant="text"
                                                                                     color="inherit"
-                                                                                    disabled={state === 'loading'}
-                                                                                    onClick={() => handleRejectAction(msg.id, index)}
+                                                                                    onClick={() => handleGatewayReject(action.id)}
                                                                                 >
-                                                                                    Refuser
+                                                                                    Rejeter
                                                                                 </Button>
-                                                                            )}
-                                                                        </Stack>
-                                                                    )}
-                                                                </Stack>
-                                                            </Box>
-                                                        );
-                                                    })}
+                                                                            </Stack>
+                                                                        ) : action.status === 'loading' ? (
+                                                                            <Stack direction="row" spacing={1} alignItems="center">
+                                                                                <CircularProgress size={14} color="inherit" />
+                                                                                <Typography variant="caption">En cours...</Typography>
+                                                                            </Stack>
+                                                                        ) : (
+                                                                            <Stack spacing={0.5}>
+                                                                                <Chip
+                                                                                    label={gatewayActionStatusLabel(action.status)}
+                                                                                    color={action.status === 'executed' ? 'success' : action.status === 'failed' ? 'error' : 'default'}
+                                                                                    size="small"
+                                                                                />
+                                                                                {action.result?.remaining_after_g !== undefined && (
+                                                                                    <Typography variant="caption" color="text.secondary">
+                                                                                        Stock restant: {action.result.remaining_after_g}g
+                                                                                    </Typography>
+                                                                                )}
+                                                                                {action.failureReason && (
+                                                                                    <Typography variant="caption" color="error">
+                                                                                        {action.failureReason}
+                                                                                    </Typography>
+                                                                                )}
+                                                                            </Stack>
+                                                                        )}
+                                                                    </Stack>
+                                                                </Box>
+                                                            ))}
                                                         </Stack>
                                                     )}
                                                 </Box>

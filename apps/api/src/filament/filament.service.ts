@@ -4,6 +4,9 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
+import type { AiAlertService } from '../ai/ai-alert.service';
+import { AI_ALERT_SERVICE } from '../ai/ai-alert.tokens';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThan, MoreThan, IsNull } from 'typeorm';
 import { Filament } from './filament.entity';
@@ -79,6 +82,7 @@ export class FilamentService {
     private organizationRepository: Repository<Organization>,
     private notificationService: NotificationService,
     private tigerMappingService: TigerMappingService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async checkPlanLimits(
@@ -1408,6 +1412,24 @@ export class FilamentService {
       console.error('Low stock check failed', e),
     );
 
+    // Alertes IA proactives (fire-and-forget, ne bloque jamais la consommation).
+    // Resolution paresseuse via ModuleRef pour eviter une dependance circulaire de modules.
+    if (filament.organizationId) {
+      try {
+        const aiAlertService = this.moduleRef.get<AiAlertService>(
+          AI_ALERT_SERVICE,
+          { strict: false },
+        );
+        aiAlertService
+          .checkAfterConsumption(filament.organizationId, filament.id)
+          .catch((e: unknown) =>
+            console.error('Echec check alertes IA post-conso', e),
+          );
+      } catch {
+        // AiAlertService indisponible (ex: contexte de test isole) — on ignore.
+      }
+    }
+
     return savedLog;
   }
 
@@ -1653,19 +1675,9 @@ export class FilamentService {
       order: { date: 'DESC' },
     });
 
-    // 2. Check Plan for Analytics
-    const canViewAnalytics = org.plan !== 'free' || isSuperAdmin;
-
-    if (!canViewAnalytics) {
-      return {
-        logs,
-        dailyUsage: {},
-        forecasts: [],
-        restricted: true, // Flag for frontend to show upsell
-      };
-    }
-
-    // 3. Aggregate Data for Analytics
+    // 2. Aggregate Data for Analytics
+    // Basic analytics are available on every plan. Forecasts are still returned
+    // by this legacy endpoint for compatibility with the current dashboard UI.
     // Group by Date (last 30 days) to show trend
     const last30Days = new Date();
     last30Days.setDate(last30Days.getDate() - 30);
@@ -1974,6 +1986,7 @@ export class FilamentService {
       forecasts: forecasts.sort(
         (a, b) => (a.daysRemaining || 9999) - (b.daysRemaining || 9999),
       ), // Critical first
+      restricted: false,
     };
   }
 

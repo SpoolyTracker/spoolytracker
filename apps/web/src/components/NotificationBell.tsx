@@ -15,7 +15,7 @@ import {
     useTheme,
     alpha
 } from '@mui/material';
-import { Bell, Check, Info, AlertTriangle, UserPlus } from 'lucide-react';
+import { Bell, Check, Info, AlertTriangle, UserPlus, Sparkles } from 'lucide-react';
 import { useNotifications } from '../context/NotificationContext';
 import { NotificationType, api } from '../api';
 import { useTranslation } from 'react-i18next';
@@ -52,6 +52,7 @@ const NotificationBell = () => {
         switch (type) {
             case NotificationType.INVITATION: return <UserPlus size={20} />;
             case NotificationType.LOW_STOCK: return <AlertTriangle size={20} />;
+            case NotificationType.AI_ALERT: return <Sparkles size={20} />;
             case NotificationType.NEW_SPOOL: return <Info size={20} />;
             case NotificationType.CONSUMPTION: return <Check size={20} />;
             case NotificationType.SYSTEM:
@@ -63,6 +64,7 @@ const NotificationBell = () => {
         switch (type) {
             case NotificationType.INVITATION: return theme.palette.primary.main;
             case NotificationType.LOW_STOCK: return theme.palette.error.main;
+            case NotificationType.AI_ALERT: return theme.palette.primary.main;
             case NotificationType.NEW_SPOOL: return theme.palette.success.main;
             case NotificationType.CONSUMPTION: return theme.palette.warning.main;
             case NotificationType.SYSTEM:

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from math import ceil
 from statistics import mean, pstdev
 
 from src.forecasting.mock_history import TODAY, build_mock_consumption_history
@@ -7,6 +8,7 @@ from src.forecasting.models import (
     MaterialRisk,
     NotificationProposal,
     ProjectRisk,
+    PurchaseRecommendation,
     RiskLevel,
     RisksResponse,
     StockForecast,
@@ -40,7 +42,7 @@ class ForecastingService:
         self.data_source = "mock_fallback"
 
     @classmethod
-    def from_snapshot(cls, snapshot: AppDataSnapshot, today: date = TODAY) -> "ForecastingService":
+    def from_snapshot(cls, snapshot: AppDataSnapshot, today: date = TODAY, source: str | None = None) -> "ForecastingService":
         inputs = snapshot.to_forecasting_inputs()
         service = cls(
             stock_items=inputs["stock_items"],
@@ -48,7 +50,7 @@ class ForecastingService:
             projects=inputs["projects"],
             today=today,
         )
-        service.data_source = snapshot.source
+        service.data_source = source or snapshot.source
         return service
 
     def forecast_all(self, include_empty: bool = False) -> list[StockForecast]:
@@ -185,6 +187,85 @@ class ForecastingService:
                     )
                 )
         return proposals
+
+    def purchase_recommendations(
+        self,
+        include_empty: bool = True,
+        low_stock_percent: float = 20,
+    ) -> list[PurchaseRecommendation]:
+        """Aggregate the spools that should be re-ordered.
+
+        A spool is recommended when it is forecasted at risk (depletion soon) or
+        physically low in stock. Urgent orders (rupture <= 7 days, critical risk
+        or <= 5% remaining) are ranked first.
+        """
+        recommendations: list[PurchaseRecommendation] = []
+        for forecast in self.forecast_all(include_empty=include_empty):
+            item = self._get_item(forecast.item_id)
+            remaining_percent = (
+                item.weight_remaining_g / item.weight_initial_g * 100
+                if item.weight_initial_g > 0
+                else 0
+            )
+            is_risk = forecast.risk_level in {
+                RiskLevel.CRITICAL,
+                RiskLevel.HIGH,
+                RiskLevel.MEDIUM,
+            }
+            is_low = remaining_percent <= low_stock_percent
+            if not (is_risk or is_low):
+                continue
+
+            days = forecast.days_until_depletion
+            if (
+                (days is not None and days <= 7)
+                or forecast.risk_level == RiskLevel.CRITICAL
+                or remaining_percent <= 5
+            ):
+                urgency = "immediate"
+            else:
+                urgency = "prochaine"
+
+            if days is not None:
+                reason = (
+                    f"Rupture estimee dans {days:g} jours "
+                    f"({item.weight_remaining_g:g}g restants, {round(remaining_percent)}%)."
+                )
+            else:
+                reason = (
+                    f"Stock faible: {item.weight_remaining_g:g}g restants "
+                    f"({round(remaining_percent)}%), historique insuffisant pour estimer une date."
+                )
+
+            recommendations.append(
+                PurchaseRecommendation(
+                    item_id=item.id,
+                    item_name=item.name,
+                    brand=item.brand,
+                    material=item.material,
+                    material_type=item.material_type,
+                    color=item.color,
+                    color_name=item.color_name,
+                    color_hex=item.color_hex,
+                    remaining_g=item.weight_remaining_g,
+                    remaining_percent=round(remaining_percent, 1),
+                    days_until_depletion=days,
+                    predicted_depletion_date=forecast.predicted_depletion_date,
+                    risk_level=forecast.risk_level,
+                    urgency=urgency,
+                    suggested_quantity_kg=max(1, ceil((item.weight_initial_g or 1000) / 1000)),
+                    reason=reason,
+                    confidence_score=forecast.confidence_score,
+                )
+            )
+
+        return sorted(
+            recommendations,
+            key=lambda rec: (
+                0 if rec.urgency == "immediate" else 1,
+                rec.days_until_depletion if rec.days_until_depletion is not None else 1e9,
+            ),
+        )
 
     def _get_item(self, item_id: str) -> StockItem:
         for item in self.stock_items:

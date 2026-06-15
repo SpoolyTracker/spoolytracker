@@ -2,12 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { FilamentService } from '../filament/filament.service';
 import { ProjectsService } from '../projects/projects.service';
 import { EmailService } from '../email/email.service';
+import { AiActionPersistenceService } from './ai-action.service';
+import { AiActionType } from './ai-action.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
 import { FilamentBrand } from '../filament/brand.entity';
 import { FilamentMaterial } from '../filament/filament-material.entity';
 import { FilamentType } from '../filament/filament-type.entity';
 import { Filament } from '../filament/filament.entity';
+import { Organization } from '../organization/organization.entity';
+import { AiMemoryService } from './ai-memory.service';
+import { hasPersistentIntelligence } from '../common/persistent-intelligence';
 
 export interface AgentResponse {
   intent: string;
@@ -34,6 +39,7 @@ type AiContextUser = {
   userId?: number;
   sub?: number;
   isSuperAdmin?: boolean;
+  systemRole?: string;
 };
 
 @Injectable()
@@ -50,6 +56,10 @@ export class AiAgentService {
     private typeRepository: Repository<FilamentType>,
     @InjectRepository(Filament)
     private filamentRepository: Repository<Filament>,
+    @InjectRepository(Organization)
+    private readonly organizationRepository: Repository<Organization>,
+    private readonly aiActionService: AiActionPersistenceService,
+    private readonly aiMemoryService: AiMemoryService,
   ) {}
 
   async processQuestion(
@@ -60,6 +70,48 @@ export class AiAgentService {
   ): Promise<AgentResponse> {
     const engineResponse = await this.askAiEngine(question, user, authorization);
     if (engineResponse) {
+      const plan = await this.resolveOrgPlan(user.organizationId);
+      const eligible = hasPersistentIntelligence(plan, user);
+
+      // Mémoire capturée (gated)
+      const captured = engineResponse.data?.captured_memory;
+      if (captured && captured.content && eligible) {
+        await this.aiMemoryService
+          .persistCaptured(captured, {
+            organizationId: user.organizationId,
+            userId: Number(user.userId || user.sub),
+          })
+          .catch((error) => {
+            console.error(
+              'Echec persistance mémoire IA:',
+              error instanceof Error ? error.message : error,
+            );
+          });
+      }
+
+      const proposed = engineResponse.data?.proposedActions || [];
+      if (Array.isArray(proposed) && proposed.length > 0) {
+        try {
+          const persisted = await this.aiActionService.persistProposals(
+            proposed
+              .filter((a: any) => a && a.type)
+              .map((a: any) => ({
+                type: a.type as AiActionType,
+                label: a.label || a.title || a.type,
+                payload: a.payload || {},
+              })),
+            { organizationId: user.organizationId, userId: user.userId || user.sub },
+          );
+          engineResponse.data = { ...engineResponse.data, actions: persisted };
+        } catch (error) {
+          console.error(
+            'Failed to persist AI proposals:',
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+
+      engineResponse.data = { ...engineResponse.data, persistentIntelligence: eligible, aiTier: eligible ? 'pro' : 'free' };
       return engineResponse;
     }
 
@@ -105,6 +157,43 @@ export class AiAgentService {
     }
   }
 
+  async isPersistentIntelligenceEnabled(organizationId: number, user: any): Promise<boolean> {
+    return hasPersistentIntelligence(await this.resolveOrgPlan(organizationId), user);
+  }
+
+  async checkEngineStatus(
+    user: AiContextUser,
+    authorization?: string,
+  ): Promise<{ available: boolean; dataSource?: string }> {
+    const engineUrl = process.env.AI_ENGINE_URL || 'http://localhost:8000';
+    const organizationId = user.organizationId;
+    const userId = user.userId || user.sub;
+    if (!engineUrl || !organizationId || !userId) return { available: false };
+    try {
+      const plan = await this.resolveOrgPlan(organizationId);
+      const effectivePlan = hasPersistentIntelligence(plan, user) ? 'pro' : plan;
+      const headers: Record<string, string> = {
+        'x-workspace-id': String(organizationId),
+        'x-organization-id': String(organizationId),
+        'x-user-id': String(userId),
+        'x-plan': effectivePlan,
+      };
+      if (authorization) headers.Authorization = authorization;
+      const res = await fetch(`${engineUrl.replace(/\/$/, '')}/status`, { headers });
+      if (!res.ok) return { available: false };
+      const body = await res.json().catch(() => ({}));
+      return { available: true, dataSource: body?.data_source };
+    } catch {
+      return { available: false };
+    }
+  }
+
+  private async resolveOrgPlan(organizationId: number): Promise<string> {
+    if (!organizationId) return 'free';
+    const org = await this.organizationRepository.findOne({ where: { id: organizationId } });
+    return org?.plan || 'free';
+  }
+
   private async askAiEngine(
     question: string,
     user: AiContextUser,
@@ -128,10 +217,21 @@ export class AiAgentService {
         headers.Authorization = authorization;
       }
 
+      const plan = await this.resolveOrgPlan(organizationId);
+      const effectivePlan = hasPersistentIntelligence(plan, user) ? 'pro' : plan;
+      headers['x-plan'] = effectivePlan;
+
+      const snapshot = await this.getApplicationContext(user).catch((error) => {
+        console.warn(
+          'AI snapshot unavailable, engine will use its own fallback:',
+          error instanceof Error ? error.message : error,
+        );
+        return null;
+      });
       const response = await fetch(`${engineUrl.replace(/\/$/, '')}/chat`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ message: question }),
+        body: JSON.stringify({ message: question, snapshot }),
       });
       if (!response.ok) {
         throw new Error(`${response.status} ${await response.text()}`);
@@ -159,6 +259,7 @@ export class AiAgentService {
 
   async getApplicationContext(user: AiContextUser) {
     const organizationId = user.organizationId;
+    const plan = await this.resolveOrgPlan(organizationId);
     const filaments = await this.filamentService.findAll(organizationId);
     const history = await this.filamentService.getAllConsumptionHistory(
       organizationId,
@@ -171,7 +272,7 @@ export class AiAgentService {
       user_id: user.userId || user.sub ? String(user.userId || user.sub) : null,
       settings: {
         organization_id: String(organizationId),
-        plan: 'pro',
+        plan,
         low_stock_threshold: 20,
         low_stock_threshold_type: 'PERCENTAGE',
       },
@@ -219,6 +320,13 @@ export class AiAgentService {
           required_g: item.weight_required_g || 0,
         })),
       })),
+      memories:
+        hasPersistentIntelligence(plan, user) && (user.userId || user.sub)
+          ? await this.aiMemoryService.searchForSnapshot(
+              { organizationId, userId: Number(user.userId || user.sub) },
+              '',
+            )
+          : undefined,
     };
   }
 

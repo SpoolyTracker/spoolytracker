@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class Settings(BaseModel):
     app_name: str = "Spooly AI Engine"
-    app_version: str = "0.1.0"
+    app_version: str = "0.1.4"
     environment: str = "local"
     debug: bool = False
     host: str = "0.0.0.0"
@@ -57,7 +57,7 @@ def get_settings() -> Settings:
     _load_dotenv(Path(".env"))
     return Settings(
         app_name=os.getenv("AI_ENGINE_APP_NAME", "Spooly AI Engine"),
-        app_version=os.getenv("AI_ENGINE_APP_VERSION", "0.1.0"),
+        app_version=os.getenv("AI_ENGINE_APP_VERSION", "0.1.4"),
         environment=os.getenv("AI_ENGINE_ENV", "local"),
         debug=_env_bool("AI_ENGINE_DEBUG", False),
         host=os.getenv("AI_ENGINE_HOST", "0.0.0.0"),

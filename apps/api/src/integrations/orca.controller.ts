@@ -77,7 +77,7 @@ export class OrcaIntegrationController {
         ),
         organizationId: orgId,
       },
-      { priority: plan === 'enterprise' || plan === 'pro' ? 1 : 10 },
+      { priority: plan === 'enterprise' || plan === 'pro' || plan === 'beta' ? 1 : 10 },
     );
 
     return { jobId: job.id, status: 'waiting' };

@@ -16,6 +16,7 @@ import { UserOrganization } from '../organization/user-organization.entity';
 import { Organization } from '../organization/organization.entity';
 import { NotificationService } from '../notification/notification.service';
 import { TigerMappingService } from '../tigertag/tiger-mapping.service';
+import { AiAlertService } from '../ai/ai-alert.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -36,6 +37,7 @@ describe('FilamentService', () => {
     count: jest.fn(),
     remove: jest.fn(),
     createQueryBuilder: jest.fn(),
+    manager: { query: jest.fn().mockResolvedValue([]) },
   });
 
   const mockNotificationService = {
@@ -107,6 +109,7 @@ describe('FilamentService', () => {
         },
         { provide: NotificationService, useValue: mockNotificationService },
         { provide: TigerMappingService, useValue: mockTigerMappingService },
+        { provide: AiAlertService, useValue: { checkAfterConsumption: jest.fn() } },
       ],
     }).compile();
 

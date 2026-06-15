@@ -14,6 +14,7 @@ export enum NotificationType {
   CONSUMPTION = 'CONSUMPTION',
   LOW_STOCK = 'LOW_STOCK',
   INVITATION = 'INVITATION',
+  AI_ALERT = 'AI_ALERT',
 }
 
 @Entity('notifications')

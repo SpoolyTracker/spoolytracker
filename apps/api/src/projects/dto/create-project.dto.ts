@@ -70,4 +70,8 @@ export class CreateProjectDto {
   @IsOptional()
   @IsNumber()
   electricity_cost_kwh?: number;
+
+  @IsOptional()
+  @IsArray()
+  overhead_rates?: Array<{ label: string; percentage: number }>;
 }

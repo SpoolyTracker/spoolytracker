@@ -4,6 +4,7 @@ import { ProjectsService } from './projects.service';
 import { ProjectsController } from './projects.controller';
 import { Project } from './entities/project.entity';
 import { ProjectItem } from './entities/project-item.entity';
+import { ProjectExternalItem } from './entities/project-external-item.entity';
 import { ProjectFile } from './entities/project-file.entity';
 import { AuthModule } from '../auth/auth.module';
 import { GcodeModule } from '../gcode/gcode.module';
@@ -18,6 +19,7 @@ import { UserOrganization } from '../organization/user-organization.entity';
     TypeOrmModule.forFeature([
       Project,
       ProjectItem,
+      ProjectExternalItem,
       ProjectFile,
       Filament,
       ConsumptionLog,

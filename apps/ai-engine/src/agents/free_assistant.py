@@ -29,6 +29,7 @@ class Intent(StrEnum):
     LOW_STOCK = "low_stock"
     CONSUMPTION_ENTRY = "consumption_entry"
     PROJECT_QUESTION = "project_question"
+    PURCHASE_QUESTION = "purchase_question"
     GENERAL_QUESTION = "general_question"
     PRO_FEATURE = "pro_feature"
 
@@ -57,6 +58,9 @@ class FreeAssistantAgent(BaseAgent):
         context = context or {}
         detection = self.detect_intent(prompt)
 
+        if detection.intent == Intent.PURCHASE_QUESTION:
+            return self._answer_purchase(context)
+
         if detection.intent == Intent.PRO_FEATURE and context.get("plan") != "pro":
             return self._answer_pro_restricted()
 
@@ -76,6 +80,24 @@ class FreeAssistantAgent(BaseAgent):
 
     def detect_intent(self, prompt: str) -> IntentDetection:
         text = prompt.lower()
+
+        if self._has_any(
+            text,
+            [
+                "commande",
+                "commander",
+                "acheter",
+                "achat",
+                "racheter",
+                "approvision",
+                "ravitail",
+                "liste de courses",
+                "a prevoir",
+                "à prévoir",
+                "quoi prendre",
+            ],
+        ):
+            return IntentDetection(intent=Intent.PURCHASE_QUESTION, confidence=0.9)
 
         if self._has_any(
             text,
@@ -382,19 +404,63 @@ class FreeAssistantAgent(BaseAgent):
             },
         )
 
-    def _answer_general(self, context: dict) -> AgentResult:
+    def _answer_purchase(self, context: dict) -> AgentResult:
+        is_pro = context.get("plan") == "pro"
+        low_stock = self._list_low_stock_items(LowStockRequest(threshold_percent=20), context)
+        if not low_stock.items:
+            base = (
+                "Aucune bobine n'est sous le seuil de 20% pour le moment, "
+                "rien d'urgent a commander."
+            )
+        else:
+            lines = [
+                f"- {self._display_stock_item(item)}: "
+                f"{item.weight_remaining_g:g}g restants ({item.remaining_percent:g}%)"
+                for item in low_stock.items
+            ]
+            base = "Bobines a surveiller pour une commande (stock faible):\n" + "\n".join(lines)
+
+        if not is_pro:
+            base += (
+                "\n\nPour des recommandations d'achat anticipees (dates de rupture estimees), "
+                "des quantites suggerees et des liens fournisseurs adaptes a votre pays, "
+                "passez en Pro."
+            )
+
         return AgentResult(
-            intent=Intent.GENERAL_QUESTION,
-            answer=(
+            intent=Intent.PURCHASE_QUESTION,
+            answer=base + self._source_note(context) + self._memory_note(context),
+            data={
+                **low_stock.model_dump(),
+                "source": context.get("data_source", "mock_fallback"),
+                "memories": context.get("memories", []),
+                "plan": context.get("plan", "free"),
+                "upsell": not is_pro,
+            },
+        )
+
+    def _answer_general(self, context: dict) -> AgentResult:
+        is_pro = context.get("plan") == "pro"
+        if is_pro:
+            answer = (
+                "Je suis l'assistant IA Pro de Spooly. En plus des questions de stock, "
+                "stock faible, saisie de consommation et besoins projet, je peux estimer "
+                "les dates de rupture, detecter les anomalies, signaler les materiaux et "
+                "projets a risque, recommander des achats et retenir vos preferences."
+            )
+        else:
+            answer = (
                 "Je suis l'assistant IA Free de Spooly. Je peux repondre sur le stock, "
                 "le stock faible, preparer une saisie de consommation et estimer les besoins "
                 "d'un projet avec les donnees disponibles."
             )
-            + self._source_note(context)
-            + self._memory_note(context),
+        return AgentResult(
+            intent=Intent.GENERAL_QUESTION,
+            answer=answer + self._source_note(context) + self._memory_note(context),
             data={
                 "source": context.get("data_source", "mock_fallback"),
                 "memories": context.get("memories", []),
+                "plan": context.get("plan", "free"),
             },
         )
 

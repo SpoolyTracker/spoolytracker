@@ -213,6 +213,7 @@ export class AuthController {
         id: uo.organization.id,
         name: uo.organization.name,
         role: uo.role,
+        notifyOnAiAlerts: uo.notifyOnAiAlerts ?? true,
       })) || [];
 
     console.log(
@@ -229,6 +230,9 @@ export class AuthController {
       notifyOnSystem: notificationPreferences?.notifyOnSystem ?? true,
       notifyOnLowStock: notificationPreferences?.notifyOnLowStock ?? true,
       notifyOnInvitation: notificationPreferences?.notifyOnInvitation ?? true,
+      notifyOnAiRupture: notificationPreferences?.notifyOnAiRupture ?? true,
+      notifyOnAiAchat: notificationPreferences?.notifyOnAiAchat ?? true,
+      notifyOnAiProjet: notificationPreferences?.notifyOnAiProjet ?? true,
     };
   }
 
