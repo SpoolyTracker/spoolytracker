@@ -543,6 +543,9 @@ export class AuthService {
       notifyOnSystem?: boolean;
       notifyOnLowStock?: boolean;
       notifyOnInvitation?: boolean;
+      notifyOnAiRupture?: boolean;
+      notifyOnAiAchat?: boolean;
+      notifyOnAiProjet?: boolean;
     },
   ) {
     const user = await this.findById(userId);
@@ -575,6 +578,12 @@ export class AuthService {
       user.notificationPreferences.notifyOnLowStock = data.notifyOnLowStock;
     if (data.notifyOnInvitation !== undefined)
       user.notificationPreferences.notifyOnInvitation = data.notifyOnInvitation;
+    if (data.notifyOnAiRupture !== undefined)
+      user.notificationPreferences.notifyOnAiRupture = data.notifyOnAiRupture;
+    if (data.notifyOnAiAchat !== undefined)
+      user.notificationPreferences.notifyOnAiAchat = data.notifyOnAiAchat;
+    if (data.notifyOnAiProjet !== undefined)
+      user.notificationPreferences.notifyOnAiProjet = data.notifyOnAiProjet;
 
     if (data.password) {
       if (user.googleId) {
@@ -596,6 +605,9 @@ export class AuthService {
       notifyOnSystem: notificationPreferences?.notifyOnSystem ?? true,
       notifyOnLowStock: notificationPreferences?.notifyOnLowStock ?? true,
       notifyOnInvitation: notificationPreferences?.notifyOnInvitation ?? true,
+      notifyOnAiRupture: notificationPreferences?.notifyOnAiRupture ?? true,
+      notifyOnAiAchat: notificationPreferences?.notifyOnAiAchat ?? true,
+      notifyOnAiProjet: notificationPreferences?.notifyOnAiProjet ?? true,
     };
   }
 

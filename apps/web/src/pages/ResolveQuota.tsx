@@ -22,7 +22,7 @@ export default function ResolveQuotaPage() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
-    const [maxAllowed, setMaxAllowed] = useState(20); // Default, updated on load
+    const [maxAllowed, setMaxAllowed] = useState(30); // Default, updated on load
 
     useEffect(() => {
         loadData();
@@ -47,7 +47,7 @@ export default function ResolveQuotaPage() {
                 return;
             }
 
-            // In our constant PLAN_LIMITS, Free plan has 20 max spools
+            // In PLAN_LIMITS, Free plan has 30 max spools.
             const limit = orgData.stats?.limits?.maxSpoolsPerOrg;
             setMaxAllowed(limit === null || limit === undefined ? 999999 : limit);
             setFilaments(filamentsData || []);

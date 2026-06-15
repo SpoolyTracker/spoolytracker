@@ -339,6 +339,22 @@ export class OrganizationService {
     return this.userOrganizationRepository.save(userOrg);
   }
 
+  async setAiAlertsPreference(
+    organizationId: number,
+    userId: number,
+    enabled: boolean,
+  ): Promise<{ organizationId: number; notifyOnAiAlerts: boolean }> {
+    const userOrg = await this.userOrganizationRepository.findOne({
+      where: { organizationId, userId },
+    });
+    if (!userOrg) {
+      throw new NotFoundException("Appartenance a l'organisation introuvable.");
+    }
+    userOrg.notifyOnAiAlerts = enabled;
+    await this.userOrganizationRepository.save(userOrg);
+    return { organizationId, notifyOnAiAlerts: enabled };
+  }
+
   async updateSettings(
     organizationId: number,
     settings: any,

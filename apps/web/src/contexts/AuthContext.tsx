@@ -17,9 +17,13 @@ interface User {
     notifyOnSystem?: boolean;
     notifyOnLowStock?: boolean;
     notifyOnInvitation?: boolean;
+    notifyOnAiRupture?: boolean;
+    notifyOnAiAchat?: boolean;
+    notifyOnAiProjet?: boolean;
     needsUsername?: boolean;
     googleId?: string | null;
     appleId?: string | null;
+    organisations?: Array<{ id: number; name: string; role: string; notifyOnAiAlerts?: boolean }>;
 }
 
 interface SocialLoginResponse {

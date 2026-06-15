@@ -13,6 +13,8 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 
 import { ProjectFile, ProjectFileType } from './entities/project-file.entity';
+import { ProjectExternalItem } from './entities/project-external-item.entity';
+import { CreateProjectExternalItemDto } from './dto/create-project-external-item.dto';
 import { GcodeAnalyzerService } from '../gcode/gcode-analyzer.service';
 import { PLAN_LIMITS } from '../common/constants';
 import * as fs from 'node:fs';
@@ -33,6 +35,8 @@ export class ProjectsService {
     private projectsRepository: Repository<Project>,
     @InjectRepository(ProjectItem)
     private projectItemsRepository: Repository<ProjectItem>,
+    @InjectRepository(ProjectExternalItem)
+    private projectExternalItemsRepository: Repository<ProjectExternalItem>,
     @InjectRepository(ProjectFile)
     private projectFilesRepository: Repository<ProjectFile>,
     @InjectRepository(Filament)
@@ -237,6 +241,7 @@ export class ProjectsService {
         'items.filament',
         'items.filament.brand',
         'items.filament.material',
+        'externalItems',
         'files',
       ],
       order: { updated_at: 'DESC' },
@@ -252,6 +257,7 @@ export class ProjectsService {
         'items.filament',
         'items.filament.brand',
         'items.filament.material',
+        'externalItems',
         'consumptionLogs',
         'consumptionLogs.filament',
         'consumptionLogs.filament.brand',
@@ -285,8 +291,14 @@ export class ProjectsService {
         : null;
     }
 
+    if (updateProjectDto.overhead_rates !== undefined) {
+      project.overhead_rates = this.normalizeOverheadRates(
+        updateProjectDto.overhead_rates,
+      );
+    }
+
     // Merge remaining fields if any (careful with types)
-    const { start_date, end_date, ...rest } = updateProjectDto;
+    const { start_date, end_date, overhead_rates, ...rest } = updateProjectDto;
     this.projectsRepository.merge(project, rest as any);
 
     console.log('Merged project', project);
@@ -310,6 +322,25 @@ export class ProjectsService {
     }
 
     return this.projectsRepository.save(project);
+  }
+
+  private normalizeOverheadRates(input: any): Array<{ label: string; percentage: number }> {
+    let rates = input;
+    if (typeof rates === 'string') {
+      try {
+        rates = JSON.parse(rates);
+      } catch {
+        rates = [];
+      }
+    }
+    if (!Array.isArray(rates)) return [];
+    return rates.map((rate) => {
+      const percentage = Number(rate?.percentage);
+      return {
+        label: String(rate?.label || '').trim(),
+        percentage: Number.isFinite(percentage) ? percentage : 0,
+      };
+    });
   }
 
   async remove(id: number, user: any, deleteConsumptions: boolean = false) {
@@ -396,6 +427,78 @@ export class ProjectsService {
     });
     if (!item) throw new NotFoundException(`Item #${itemId} not found`);
     return this.projectItemsRepository.remove(item);
+  }
+
+  async updateItem(projectId: number, itemId: number, data: any, user: any) {
+    const project = await this.findOne(projectId, user);
+    const item = await this.projectItemsRepository.findOne({
+      where: { id: itemId, project: { id: project.id } },
+      relations: ['filament'],
+    });
+    if (!item) throw new NotFoundException(`Item #${itemId} not found`);
+
+    if (data.filamentId !== undefined) {
+      (item as any).filamentId = data.filamentId ? Number(data.filamentId) : null;
+      (item as any).filament = data.filamentId
+        ? ({ id: Number(data.filamentId) } as any)
+        : null;
+    }
+    if (data.material !== undefined) item.material = data.material;
+    if (data.color !== undefined) item.color = data.color;
+    if (data.weight_required_g !== undefined) {
+      item.weight_required_g = Number(data.weight_required_g) || 0;
+    }
+    if (data.weight_used_g !== undefined) {
+      item.weight_used_g = Number(data.weight_used_g) || 0;
+    }
+
+    return this.projectItemsRepository.save(item);
+  }
+
+  async addExternalItem(
+    projectId: number,
+    createProjectExternalItemDto: CreateProjectExternalItemDto,
+    user: any,
+  ) {
+    const project = await this.findOne(projectId, user);
+    const item = this.projectExternalItemsRepository.create({
+      ...createProjectExternalItemDto,
+      unit_price: Number(createProjectExternalItemDto.unit_price) || 0,
+      quantity: Number(createProjectExternalItemDto.quantity) || 0,
+      project: { id: project.id },
+    });
+    return this.projectExternalItemsRepository.save(item);
+  }
+
+  async removeExternalItem(projectId: number, itemId: number, user: any) {
+    const project = await this.findOne(projectId, user);
+    const item = await this.projectExternalItemsRepository.findOne({
+      where: { id: itemId, project: { id: project.id } },
+    });
+    if (!item) throw new NotFoundException(`External item #${itemId} not found`);
+    return this.projectExternalItemsRepository.remove(item);
+  }
+
+  async updateExternalItem(
+    projectId: number,
+    itemId: number,
+    data: Partial<CreateProjectExternalItemDto>,
+    user: any,
+  ) {
+    const project = await this.findOne(projectId, user);
+    const item = await this.projectExternalItemsRepository.findOne({
+      where: { id: itemId, project: { id: project.id } },
+    });
+    if (!item) throw new NotFoundException(`External item #${itemId} not found`);
+
+    if (data.title !== undefined) item.title = data.title;
+    if (data.external_ref !== undefined) item.external_ref = data.external_ref || null;
+    if (data.source !== undefined) item.source = data.source || null;
+    if (data.url !== undefined) item.url = data.url || null;
+    if (data.unit_price !== undefined) item.unit_price = Number(data.unit_price) || 0;
+    if (data.quantity !== undefined) item.quantity = Number(data.quantity) || 0;
+
+    return this.projectExternalItemsRepository.save(item);
   }
 
   // In projects.service.ts
@@ -751,6 +854,11 @@ export class ProjectsService {
       printTimeHours * (Number(project.machine_hourly_rate) || 0);
     const laborCost = laborTimeHours * (Number(project.labor_hourly_rate) || 0);
     const miscCosts = Number(project.misc_costs) || 0;
+    const externalItemsCost = (project.externalItems || []).reduce(
+      (sum, item) =>
+        sum + (Number(item.unit_price) || 0) * (Number(item.quantity) || 0),
+      0,
+    );
 
     let materialCost = 0;
     // Group by filament for specific table
@@ -779,7 +887,16 @@ export class ProjectsService {
       });
     }
 
-    const totalCost = machineCost + laborCost + miscCosts + materialCost;
+    const subtotalBeforeOverheads =
+      machineCost + laborCost + miscCosts + materialCost + externalItemsCost;
+    const overheadCosts = (project.overhead_rates || []).map((rate) => ({
+      label: rate.label || 'Charge',
+      percentage: Number(rate.percentage) || 0,
+      value: (subtotalBeforeOverheads * (Number(rate.percentage) || 0)) / 100,
+    }));
+    const totalCost =
+      subtotalBeforeOverheads +
+      overheadCosts.reduce((sum, rate) => sum + rate.value, 0);
     const margin = (Number(project.target_selling_price) || 0) - totalCost;
     const marginPercent = totalCost > 0 ? (margin / totalCost) * 100 : 0; // Markup? Or Margin (margin/price)? User usually means profit.
 
@@ -939,7 +1056,12 @@ export class ProjectsService {
       { label: t('machineCost'), value: machineCost },
       { label: t('laborCost'), value: laborCost },
       { label: t('materialCost'), value: materialCost },
+      { label: 'External BOM', value: externalItemsCost },
       { label: t('miscCost'), value: miscCosts },
+      ...overheadCosts.map((rate) => ({
+        label: `${rate.label} (${rate.percentage}%)`,
+        value: rate.value,
+      })),
     ];
 
     costs.forEach((c) => {

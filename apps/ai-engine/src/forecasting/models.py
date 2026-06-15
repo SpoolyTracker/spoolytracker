@@ -89,3 +89,47 @@ class NotificationProposalsResponse(BaseModel):
     plan: str = "pro"
     source: str = "mock_fallback"
     proposals: list[NotificationProposal]
+
+
+class PurchaseRecommendation(BaseModel):
+    item_id: str
+    item_name: str
+    brand: str | None = None
+    material: str
+    material_type: str | None = None
+    color: str
+    color_name: str | None = None
+    color_hex: str | None = None
+    remaining_g: float
+    remaining_percent: float
+    days_until_depletion: float | None = None
+    predicted_depletion_date: date | None = None
+    risk_level: RiskLevel
+    urgency: str
+    suggested_quantity_kg: int = 1
+    reason: str
+    confidence_score: float = Field(ge=0, le=1)
+    provider_name: str | None = None
+    provider_url: str | None = None
+
+
+class PurchaseRecommendationsResponse(BaseModel):
+    plan: str = "pro"
+    source: str = "mock_fallback"
+    country: str | None = None
+    recommendations: list[PurchaseRecommendation]
+
+
+class ProactiveAlert(BaseModel):
+    type: str  # "rupture" | "achat" | "projet"
+    alert_key: str
+    severity: RiskLevel
+    title: str
+    message: str
+    data: dict = Field(default_factory=dict)
+
+
+class AlertsResponse(BaseModel):
+    plan: str = "pro"
+    source: str = "mock_fallback"
+    alerts: list[ProactiveAlert]

@@ -1,4 +1,4 @@
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // Simple hash to color
 const stringToColor = (str: string) => {
@@ -11,14 +11,15 @@ const stringToColor = (str: string) => {
 };
 
 interface DashboardChartProps {
-    data: any[];
+    data: Record<string, unknown>[];
     keys?: string[];
     viewMode?: 'weight' | 'cost';
     colorMap?: Record<string, string>;
     chartType?: 'bar' | 'line';
+    showLegend?: boolean;
 }
 
-export default function DashboardChart({ data, keys = [], viewMode = 'weight', colorMap = {}, chartType = 'bar' }: DashboardChartProps) {
+export default function DashboardChart({ data, keys = [], viewMode = 'weight', colorMap = {}, chartType = 'bar', showLegend = false }: DashboardChartProps) {
 
     // Format value for axis/tooltip
     const formatValue = (value: number) => {
@@ -55,6 +56,7 @@ export default function DashboardChart({ data, keys = [], viewMode = 'weight', c
                         contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
                         formatter={(value: number, name: string) => [formatValue(value), name]}
                     />
+                    {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}
                     {keys.length > 0 ? (
                         keys.map((key) => (
                             chartType === 'line' ? (

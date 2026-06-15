@@ -5,7 +5,7 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import { useTheme } from '@mui/material/styles';
-import { BarChart3, Database, FileSearch, Folder, LayoutDashboard, Package, Scale, Settings, Smartphone } from 'lucide-react';
+import { BarChart3, Database, FileSearch, Folder, LayoutDashboard, LineChart, Package, Scale, Settings, Smartphone } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -50,6 +50,7 @@ export default function Sidebar({ drawerOpen, drawerToggle }: SidebarProps) {
 
     const mainNavItems = [
         { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/dashboard', tourId: 'tour-dashboard' },
+        { icon: LineChart, label: t('sidebar.analytics', 'Analytique'), path: '/analytics', tourId: 'tour-analytics' },
         { icon: Package, label: t('sidebar.inventory'), path: '/inventory', tourId: 'tour-inventory' },
         { icon: BarChart3, label: t('sidebar.consumption') || 'Consumption', path: '/consumption', tourId: 'tour-consumption' },
         { icon: Folder, label: t('sidebar.projects') || 'Projects', path: '/projects', tourId: 'tour-projects' },

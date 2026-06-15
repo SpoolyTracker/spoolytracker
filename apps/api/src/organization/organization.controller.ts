@@ -124,6 +124,22 @@ export class OrganizationController {
     return this.organizationService.updateSettings(+id, body.settings);
   }
 
+  // Preference personnelle du membre: activer/couper les alertes IA pour CETTE org.
+  @Post(':id/ai-alerts-preference')
+  @UseGuards(OrganizationGuard, OrganizationRoleGuard)
+  @OrganizationRoles('member')
+  async setAiAlertsPreference(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { enabled: boolean },
+  ) {
+    return this.organizationService.setAiAlertsPreference(
+      +id,
+      req.user.id,
+      body.enabled !== false,
+    );
+  }
+
   @Post(':id/logo')
   @UseGuards(OrganizationGuard, OrganizationRoleGuard)
   @OrganizationRoles('admin')

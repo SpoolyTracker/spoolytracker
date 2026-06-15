@@ -7,17 +7,18 @@ import {
   UseInterceptors,
   UseGuards,
   Request,
-  ForbiddenException,
   UnauthorizedException,
+  Param,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OrganizationGuard } from '../common/organization.guard';
 import { AiAgentService } from './ai-agent.service';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Organization } from '../organization/organization.entity';
+import { AiActionPersistenceService } from './ai-action.service';
+import { AiActionStatus } from './ai-action.entity';
+import { AiMemoryService } from './ai-memory.service';
 
 @ApiTags('ai')
 @ApiBearerAuth()
@@ -27,9 +28,19 @@ import { Organization } from '../organization/organization.entity';
 export class AiAgentController {
   constructor(
     private readonly aiAgentService: AiAgentService,
-    @InjectRepository(Organization)
-    private organizationRepository: Repository<Organization>,
+    private readonly aiActionService: AiActionPersistenceService,
+    private readonly aiMemoryService: AiMemoryService,
   ) {}
+
+  @Get('status')
+  async aiStatus(@Request() req: any) {
+    const enabled = await this.aiAgentService.isPersistentIntelligenceEnabled(req.organizationId, req.user);
+    const engine = await this.aiAgentService.checkEngineStatus(
+      { organizationId: req.organizationId, userId: req.user.userId || req.user.sub, isSuperAdmin: req.user.isSuperAdmin, systemRole: req.user.systemRole },
+      req.headers.authorization,
+    );
+    return { tier: enabled ? 'pro' : 'free', persistentIntelligence: enabled, engine };
+  }
 
   @Post('ask')
   async askQuestion(@Request() req: any, @Body() body: { question: string }) {
@@ -43,31 +54,10 @@ export class AiAgentController {
       req.ip ||
       'Unknown IP';
 
-    // Check if user's organization has access to AI features
     const organizationId = req.organizationId;
     if (!organizationId) {
       throw new UnauthorizedException('Organization not specified');
     }
-    const org = await this.organizationRepository.findOne({
-      where: { id: organizationId },
-    });
-    const now = new Date();
-    const isEligible =
-      req.user.isSuperAdmin ||
-      (org &&
-        (org.plan === 'pro' ||
-          org.plan === 'enterprise' ||
-          org.plan === 'beta' ||
-          (org.trialEndsAt && new Date(org.trialEndsAt) > now)));
-
-    if (!isEligible) {
-      return {
-        intent: 'restricted',
-        answer:
-          "🌟 **L'Assistant IA est une fonctionnalité Pro.**\n\nPassez à l'abonnement Pro ou démarrez votre essai de 15 jours pour débloquer l'Assistant IA, les prévisions intelligentes de rupture de stock, et bien plus encore !",
-      };
-    }
-
     // Attach organizationId to user context so the service can use it
     req.user.organizationId = organizationId;
     return this.aiAgentService.processQuestion(
@@ -103,5 +93,44 @@ export class AiAgentController {
     }
     req.user.organizationId = organizationId;
     return this.aiAgentService.analyzeRackPhoto(image, organizationId);
+  }
+
+  @Get('actions')
+  async listActions(@Request() req: any, @Query('status') status?: AiActionStatus) {
+    const user = { organizationId: req.organizationId, userId: req.user.userId || req.user.sub };
+    return this.aiActionService.list(user, status);
+  }
+
+  @Post('actions/:id/approve')
+  async approveAction(@Request() req: any, @Param('id') id: string) {
+    const user = { ...req.user, organizationId: req.organizationId, userId: req.user.userId || req.user.sub };
+    return this.aiActionService.approve(id, user);
+  }
+
+  @Post('actions/:id/reject')
+  async rejectAction(@Request() req: any, @Param('id') id: string) {
+    const user = { organizationId: req.organizationId, userId: req.user.userId || req.user.sub };
+    return this.aiActionService.reject(id, user);
+  }
+
+  @Get('memories')
+  async listMemories(@Request() req: any) {
+    const enabled = await this.aiAgentService.isPersistentIntelligenceEnabled(req.organizationId, req.user);
+    if (!enabled) return [];
+    return this.aiMemoryService.list({
+      organizationId: req.organizationId,
+      userId: Number(req.user.userId || req.user.sub),
+    });
+  }
+
+  @Post('memories/:id/delete')
+  async deleteMemory(@Request() req: any, @Param('id') id: string) {
+    const enabled = await this.aiAgentService.isPersistentIntelligenceEnabled(req.organizationId, req.user);
+    if (!enabled) return { deleted: false };
+    await this.aiMemoryService.delete(id, {
+      organizationId: req.organizationId,
+      userId: Number(req.user.userId || req.user.sub),
+    });
+    return { deleted: true };
   }
 }

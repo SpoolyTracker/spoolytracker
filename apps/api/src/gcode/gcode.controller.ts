@@ -33,8 +33,10 @@ import * as crypto from 'node:crypto';
 import { unlinkSync } from 'node:fs';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { Get, Param } from '@nestjs/common';
+import { Delete, Get, Param } from '@nestjs/common';
 import { PLAN_LIMITS } from '../common/constants';
+import { FilamentMappingMemoryService } from './filament-mapping-memory.service';
+import { hasPersistentIntelligence } from '../common/persistent-intelligence';
 
 type SpoolSpec = {
   densityGcm3?: number; // fallback to defaultDensityGcm3
@@ -54,6 +56,7 @@ export class GcodeController {
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
     @InjectQueue('gcode') private readonly gcodeQueue: Queue,
+    private readonly mappingMemory: FilamentMappingMemoryService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -150,7 +153,10 @@ export class GcodeController {
       DEFAULT_DENSITY_GCM3,
     );
 
-    const jobPriority = plan === 'enterprise' || plan === 'pro' ? 1 : 10;
+    const jobPriority =
+      plan === 'enterprise' || plan === 'pro' || plan === 'beta' ? 1 : 10;
+
+    const canLearn = hasPersistentIntelligence(plan, req.user);
 
     const job = await this.gcodeQueue.add(
       'inspect',
@@ -161,6 +167,7 @@ export class GcodeController {
         d,
         rho,
         organizationId: orgId,
+        canLearn,
       },
       { priority: jobPriority },
     );
@@ -240,7 +247,8 @@ export class GcodeController {
       tryParseJson<Record<string, Record<string, string>>>(plateMappingsRaw); // optional per plate
     const spools = tryParseJson<Record<string, SpoolSpec>>(spoolsRaw); // optional
 
-    const jobPriority = plan === 'enterprise' || plan === 'pro' ? 1 : 10;
+    const jobPriority =
+      plan === 'enterprise' || plan === 'pro' || plan === 'beta' ? 1 : 10;
 
     const job = await this.gcodeQueue.add(
       'compute',
@@ -259,6 +267,45 @@ export class GcodeController {
     );
 
     return { jobId: job.id, status: 'waiting' };
+  }
+
+  @Post('mappings/confirm')
+  async confirmMappings(@Req() req: any, @Body('mappings') mappings: any[]) {
+    const org = await this.organizationRepository.findOne({
+      where: { id: req.organizationId },
+    });
+    const plan = org?.plan || 'free';
+    if (!hasPersistentIntelligence(plan, req.user)) {
+      return { recorded: 0, persistentIntelligence: false };
+    }
+    const result = await this.mappingMemory.recordConfirmations(
+      req.organizationId,
+      mappings || [],
+    );
+    return { ...result, persistentIntelligence: true };
+  }
+
+  @Get('mappings')
+  async listMappings(@Req() req: any) {
+    const org = await this.organizationRepository.findOne({
+      where: { id: req.organizationId },
+    });
+    const plan = org?.plan || 'free';
+    if (!hasPersistentIntelligence(plan, req.user)) return [];
+    return this.mappingMemory.listForOrg(req.organizationId);
+  }
+
+  @Delete('mappings/:id')
+  async deleteMapping(@Req() req: any, @Param('id') id: string) {
+    const org = await this.organizationRepository.findOne({
+      where: { id: req.organizationId },
+    });
+    const plan = org?.plan || 'free';
+    if (!hasPersistentIntelligence(plan, req.user)) {
+      return { deleted: false };
+    }
+    await this.mappingMemory.deleteForOrg(id, req.organizationId);
+    return { deleted: true };
   }
 }
 

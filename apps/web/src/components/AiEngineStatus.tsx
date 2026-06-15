@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Bot, CloudOff, DatabaseZap } from 'lucide-react';
-import { Box, ButtonBase, Tooltip, Typography } from '@mui/material';
-import { aiEngine, type AiEngineStatus as AiEngineStatusResponse } from '../api';
+import { Bot, CloudOff, Crown, DatabaseZap } from 'lucide-react';
+import { Box, ButtonBase, Chip, Tooltip, Typography } from '@mui/material';
+import { aiEngine, aiStatus, type AiEngineStatus as AiEngineStatusResponse, type AiTierStatus } from '../api';
 
 type StatusState = 'checking' | 'api' | 'mock' | 'down';
 
@@ -45,6 +45,7 @@ const resolveState = (status: AiEngineStatusResponse | null): StatusState => {
 export default function AiEngineStatus() {
     const [state, setState] = useState<StatusState>('checking');
     const [status, setStatus] = useState<AiEngineStatusResponse | null>(null);
+    const [tier, setTier] = useState<AiTierStatus | null>(null);
 
     const refresh = async () => {
         setState((current) => (current === 'down' ? 'checking' : current));
@@ -56,6 +57,11 @@ export default function AiEngineStatus() {
             setStatus(null);
             setState('down');
         }
+        try {
+            setTier(await aiStatus());
+        } catch {
+            setTier(null);
+        }
     };
 
     useEffect(() => {
@@ -66,56 +72,78 @@ export default function AiEngineStatus() {
 
     const config = statusConfig[state];
     const Icon = config.icon;
-    const tooltip = status
-        ? [
-            config.tooltip,
-            `Source: ${status.data_source}.`,
-            status.api_base_url ? `API: ${status.api_base_url}.` : null,
-            status.fallback_reason ? `Raison: ${status.fallback_reason}.` : null,
-            `LLM: ${status.llm.provider}${status.llm.available ? ' actif' : ' inactif'}.`,
-        ].filter(Boolean).join(' ')
-        : config.tooltip;
+    const isPro = tier?.tier === 'pro';
+    const tierLabel = tier ? (isPro ? 'IA Pro' : 'IA Free') : null;
+    const tierColor = isPro ? '#7c3aed' : '#64748b';
+    const tierBackground = isPro ? 'rgba(124, 58, 237, 0.12)' : 'rgba(100, 116, 139, 0.12)';
+    const tooltip = [
+        status ? config.tooltip : config.tooltip,
+        status ? `Source: ${status.data_source}.` : null,
+        status?.api_base_url ? `API: ${status.api_base_url}.` : null,
+        status?.fallback_reason ? `Raison: ${status.fallback_reason}.` : null,
+        status ? `LLM: ${status.llm.provider}${status.llm.available ? ' actif' : ' inactif'}.` : null,
+        tier ? `Niveau IA: ${isPro ? 'Pro (intelligence persistante)' : 'Free (suggestions de base)'}.` : null,
+    ].filter(Boolean).join(' ');
 
     return (
-        <Tooltip title={tooltip}>
-            <ButtonBase
-                onClick={refresh}
-                sx={{
-                    mr: 1,
-                    borderRadius: '999px',
-                    px: { xs: 0.75, md: 1.25 },
-                    py: 0.75,
-                    gap: 0.75,
-                    bgcolor: config.background,
-                    color: config.color,
-                    border: `1px solid ${config.color}33`,
-                    '&:hover': { bgcolor: config.background },
-                }}
-            >
-                <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <Icon size={18} />
-                    <Box
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mr: 1 }}>
+            <Tooltip title={tooltip}>
+                <ButtonBase
+                    onClick={refresh}
+                    sx={{
+                        borderRadius: '999px',
+                        px: { xs: 0.75, md: 1.25 },
+                        py: 0.75,
+                        gap: 0.75,
+                        bgcolor: config.background,
+                        color: config.color,
+                        border: `1px solid ${config.color}33`,
+                        '&:hover': { bgcolor: config.background },
+                    }}
+                >
+                    <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                        <Icon size={18} />
+                        <Box
+                            sx={{
+                                position: 'absolute',
+                                right: -3,
+                                bottom: -3,
+                                width: 7,
+                                height: 7,
+                                borderRadius: '50%',
+                                bgcolor: config.color,
+                                border: '1px solid',
+                                borderColor: 'background.paper',
+                            }}
+                        />
+                    </Box>
+                    <Typography
+                        variant="caption"
+                        fontWeight={700}
+                        sx={{ display: { xs: 'none', md: 'block' }, lineHeight: 1 }}
+                    >
+                        {config.label}
+                    </Typography>
+                </ButtonBase>
+            </Tooltip>
+            {tierLabel && (
+                <Tooltip title={tooltip}>
+                    <Chip
+                        icon={isPro ? <Crown size={13} /> : undefined}
+                        label={tierLabel}
+                        size="small"
                         sx={{
-                            position: 'absolute',
-                            right: -3,
-                            bottom: -3,
-                            width: 7,
-                            height: 7,
-                            borderRadius: '50%',
-                            bgcolor: config.color,
-                            border: '1px solid',
-                            borderColor: 'background.paper',
+                            height: 24,
+                            fontWeight: 800,
+                            fontSize: '0.7rem',
+                            color: tierColor,
+                            bgcolor: tierBackground,
+                            border: `1px solid ${tierColor}33`,
+                            '& .MuiChip-icon': { color: tierColor },
                         }}
                     />
-                </Box>
-                <Typography
-                    variant="caption"
-                    fontWeight={700}
-                    sx={{ display: { xs: 'none', md: 'block' }, lineHeight: 1 }}
-                >
-                    {config.label}
-                </Typography>
-            </ButtonBase>
-        </Tooltip>
+                </Tooltip>
+            )}
+        </Box>
     );
 }

@@ -7,6 +7,13 @@ const cookieExtractor = (req: any): string | null => {
   return req?.cookies?.access_token ?? null;
 };
 
+// EventSource (SSE) ne peut pas envoyer d'en-tete Authorization: le flux temps reel
+// des notifications passe le JWT en query (?token=...). On l'extrait ici.
+const queryTokenExtractor = (req: any): string | null => {
+  const token = req?.query?.token;
+  return typeof token === 'string' && token.length > 0 ? token : null;
+};
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private configService: ConfigService) {
@@ -14,6 +21,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromExtractors([
         ExtractJwt.fromAuthHeaderAsBearerToken(),
         cookieExtractor,
+        queryTokenExtractor,
       ]),
       ignoreExpiration: false,
       secretOrKey:

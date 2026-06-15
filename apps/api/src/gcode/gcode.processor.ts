@@ -2,6 +2,7 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { GcodeAnalyzerService } from './gcode-analyzer.service';
 import { FilamentMatchingService } from './filament-matching.service';
+import { FilamentMappingMemoryService } from './filament-mapping-memory.service';
 import { BadRequestException, Logger } from '@nestjs/common';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -17,6 +18,7 @@ export interface InspectJobData {
   d: number;
   rho: number;
   organizationId: number;
+  canLearn?: boolean;
 }
 
 export interface ComputeJobData {
@@ -38,6 +40,7 @@ export class GcodeProcessor extends WorkerHost {
   constructor(
     private readonly analyzer: GcodeAnalyzerService,
     private readonly filamentMatcher: FilamentMatchingService,
+    private readonly filamentMappingMemory: FilamentMappingMemoryService,
   ) {
     super();
   }
@@ -278,10 +281,16 @@ export class GcodeProcessor extends WorkerHost {
           }
       }
 
+      const canLearn = job.data.canLearn === true;
+      const signatureIndex = canLearn
+        ? await this.filamentMappingMemory.getSignatureIndex(organizationId)
+        : undefined;
+
       result.matching = await this.filamentMatcher.suggestForInspection(
         organizationId,
         result,
         originalName,
+        { canLearn, signatureIndex },
       );
 
       return result;

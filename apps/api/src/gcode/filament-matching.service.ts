@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Filament } from '../filament/filament.entity';
 import { ToolFilamentHint } from './gcode-analyzer.service';
+import { buildSignatureHash } from './filament-signature';
 
 type MatchReason =
   | 'material_match'
@@ -15,7 +16,8 @@ type MatchReason =
   | 'insufficient_stock'
   | 'temperature_compatible'
   | 'locked'
-  | 'empty';
+  | 'empty'
+  | 'previously_confirmed';
 
 export interface FilamentCandidate {
   filamentId: number;
@@ -50,6 +52,7 @@ export class FilamentMatchingService {
     organizationId: number,
     inspection: any,
     fileName: string,
+    options?: { canLearn?: boolean; signatureIndex?: Map<string, Set<number>> },
   ) {
     // Keep the first version deliberately deterministic and explainable.
     // The UI can show "why" a spool was suggested, and we can tune weights
@@ -63,16 +66,26 @@ export class FilamentMatchingService {
     const perTool = inspection?.perTool || {};
     const tools = (inspection?.tools || Object.keys(perTool || {})) as string[];
 
+    const canLearn = options?.canLearn === true;
+    const signatureIndex = options?.signatureIndex;
+
     const toolSuggestions = tools.map((tool) => {
       const requiredWeightG =
         perTool?.[tool]?.gramDefault ||
         getPlateWeightForTool(inspection?.plates || [], tool);
 
+      const hint = hints[tool] || { tool };
+      const confirmedFilamentIds =
+        canLearn && signatureIndex
+          ? signatureIndex.get(buildSignatureHash(hint)) ?? new Set<number>()
+          : new Set<number>();
+
       return this.matchTool(
         tool,
-        hints[tool] || { tool },
+        hint,
         Number(requiredWeightG) || 0,
         filaments,
+        confirmedFilamentIds,
       );
     });
 
@@ -87,12 +100,13 @@ export class FilamentMatchingService {
     hint: ToolFilamentHint,
     requiredWeightG: number,
     filaments: Filament[],
+    confirmedFilamentIds: Set<number> = new Set(),
   ): ToolMatchSuggestion {
     // Score every active spool, then keep only the most useful candidates.
     // Negative but non-fatal scores are kept because they can still be useful
     // when the slicer provides poor metadata.
     const candidates = filaments
-      .map((filament) => this.scoreFilament(filament, hint, requiredWeightG))
+      .map((filament) => this.scoreFilament(filament, hint, requiredWeightG, confirmedFilamentIds))
       .filter((candidate) => candidate.score > -80)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);
@@ -104,6 +118,7 @@ export class FilamentMatchingService {
     filament: Filament,
     hint: ToolFilamentHint,
     requiredWeightG: number,
+    confirmedFilamentIds: Set<number> = new Set(),
   ): FilamentCandidate {
     let score = 0;
     const reasons: MatchReason[] = [];
@@ -189,6 +204,11 @@ export class FilamentMatchingService {
       score -= 100;
       reasons.push('empty');
       warnings.push('Filament is empty');
+    }
+
+    if (confirmedFilamentIds.has(filament.id)) {
+      score += 60;
+      reasons.push('previously_confirmed');
     }
 
     return {

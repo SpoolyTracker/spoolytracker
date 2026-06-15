@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ProjectsService } from './projects.service';
 import { Project } from './entities/project.entity';
 import { ProjectItem } from './entities/project-item.entity';
+import { ProjectExternalItem } from './entities/project-external-item.entity';
 import { ProjectFile } from './entities/project-file.entity';
 import { Filament } from '../filament/filament.entity';
 import { ConsumptionLog } from '../filament/consumption-log.entity';
@@ -31,6 +32,7 @@ describe('ProjectsService', () => {
         ProjectsService,
         { provide: getRepositoryToken(Project), useFactory: mockRepository },
         { provide: getRepositoryToken(ProjectItem), useFactory: mockRepository },
+        { provide: getRepositoryToken(ProjectExternalItem), useFactory: mockRepository },
         { provide: getRepositoryToken(ProjectFile), useFactory: mockRepository },
         { provide: getRepositoryToken(Filament), useFactory: mockRepository },
         {

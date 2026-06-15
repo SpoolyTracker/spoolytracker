@@ -188,3 +188,43 @@ def test_pro_chat_does_not_use_restricted_free_answer() -> None:
 
     assert response.intent == "pro_stock_forecast"
     assert "prevision Pro" in response.answer
+
+
+def test_purchase_recommendations_rank_urgent_first() -> None:
+    recommendations = _service().purchase_recommendations()
+
+    assert recommendations
+    pla = next(rec for rec in recommendations if rec.item_id == "pla-low")
+    assert pla.urgency in {"immediate", "prochaine"}
+    assert pla.suggested_quantity_kg >= 1
+    assert pla.reason
+    # urgent recommendations are listed before the non-urgent ones
+    urgencies = [0 if rec.urgency == "immediate" else 1 for rec in recommendations]
+    assert urgencies == sorted(urgencies)
+
+
+def test_pro_chat_handles_purchase_question() -> None:
+    response = asyncio.run(
+        chat(
+            ChatRequest(message="Qu'est-ce que je dois commander ?"),
+            context=None,
+            plan=PlanContext(plan=Plan.PRO),
+        )
+    )
+
+    assert response.intent == "pro_purchase_recommendations"
+    assert "recommendations" in (response.data or {})
+
+
+def test_free_chat_purchase_question_gives_basic_answer_with_upsell() -> None:
+    response = asyncio.run(
+        chat(
+            ChatRequest(message="Qu'est-ce que je dois commander ?"),
+            context=None,
+            plan=PlanContext(plan=Plan.FREE),
+        )
+    )
+
+    assert response.intent == "purchase_question"
+    assert response.data["upsell"] is True
+    assert "Pro" in response.answer

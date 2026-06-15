@@ -1,3 +1,5 @@
+import type { AnalyticsOverview } from './types/analytics';
+
 export interface Brand {
     id: number;
     name: string;
@@ -218,6 +220,24 @@ export interface ProjectItem {
     weight_used_g: number;
 }
 
+export interface ProjectOverheadRate {
+    label: string;
+    percentage: number;
+}
+
+export interface ProjectExternalItem {
+    id: number;
+    projectId: number;
+    title: string;
+    external_ref?: string | null;
+    source?: string | null;
+    url?: string | null;
+    unit_price: number;
+    quantity: number;
+    created_at?: string;
+    updated_at?: string;
+}
+
 export interface ProjectFile {
     id: number;
     projectId: number;
@@ -261,6 +281,8 @@ export interface Project {
     notes?: string;
     tags?: string[];
     items?: ProjectItem[];
+    externalItems?: ProjectExternalItem[];
+    overhead_rates?: ProjectOverheadRate[];
     files: ProjectFile[];
     consumptionLogs: ConsumptionLog[];
     created_at: string;
@@ -413,6 +435,7 @@ export const NotificationType = {
     CONSUMPTION: 'CONSUMPTION',
     LOW_STOCK: 'LOW_STOCK',
     INVITATION: 'INVITATION',
+    AI_ALERT: 'AI_ALERT',
 } as const;
 
 export type NotificationType = typeof NotificationType[keyof typeof NotificationType];
@@ -574,6 +597,13 @@ export const api = {
         return apiFetch(`${BASE_URL}/organizations/${orgId}/members/${userId}/role`, {
             method: 'PUT',
             body: JSON.stringify({ role }),
+        });
+    },
+
+    async setOrgAiAlertsPreference(orgId: number, enabled: boolean): Promise<{ organizationId: number; notifyOnAiAlerts: boolean }> {
+        return apiFetch(`${BASE_URL}/organizations/${orgId}/ai-alerts-preference`, {
+            method: 'POST',
+            body: JSON.stringify({ enabled }),
         });
     },
 
@@ -1236,6 +1266,44 @@ export const api = {
         if (!res.ok) throw new Error('Failed to remove project item');
     },
 
+    async updateProjectItem(projectId: number, itemId: number, data: Partial<ProjectItem>): Promise<ProjectItem> {
+        const res = await authAwareFetch(`${BASE_URL}/projects/${projectId}/items/${itemId}`, {
+            method: 'PATCH',
+            headers: getHeaders(),
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error('Failed to update project item');
+        return res.json();
+    },
+
+    async addProjectExternalItem(projectId: number, data: Omit<ProjectExternalItem, 'id' | 'projectId'>): Promise<ProjectExternalItem> {
+        const res = await authAwareFetch(`${BASE_URL}/projects/${projectId}/external-items`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error('Failed to add external project item');
+        return res.json();
+    },
+
+    async removeProjectExternalItem(projectId: number, itemId: number): Promise<void> {
+        const res = await authAwareFetch(`${BASE_URL}/projects/${projectId}/external-items/${itemId}`, {
+            method: 'DELETE',
+            headers: getHeaders(),
+        });
+        if (!res.ok) throw new Error('Failed to remove external project item');
+    },
+
+    async updateProjectExternalItem(projectId: number, itemId: number, data: Partial<ProjectExternalItem>): Promise<ProjectExternalItem> {
+        const res = await authAwareFetch(`${BASE_URL}/projects/${projectId}/external-items/${itemId}`, {
+            method: 'PATCH',
+            headers: getHeaders(),
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error('Failed to update external project item');
+        return res.json();
+    },
+
     async addProjectConsumption(projectId: number, data: any): Promise<ConsumptionLog> {
         const res = await authAwareFetch(`${BASE_URL}/projects/${projectId}/consumption`, {
             method: 'POST',
@@ -1587,7 +1655,14 @@ export const api = {
         });
         if (!response.ok) throw new Error('Failed to submit support ticket');
         return response.json();
-    }
+    },
+
+    confirmGcodeMappings: async (
+        mappings: Array<{ hint: any; filamentId: number }>,
+    ) => apiFetch(`${BASE_URL}/gcode/mappings/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({ mappings }),
+    }),
 };
 
 // --- AI Agent ---
@@ -1644,16 +1719,6 @@ export interface AiMemoryRecord {
     metadata: Record<string, any>;
     created_at: string;
     updated_at: string;
-}
-
-export interface AiAction {
-    id: string;
-    type: string;
-    status: 'proposed' | 'approved' | 'rejected' | 'executed' | 'failed';
-    title: string;
-    payload: Record<string, any>;
-    execution_result?: Record<string, any> | null;
-    failure_reason?: string | null;
 }
 
 export interface ReplenishmentSuggestion {
@@ -1734,13 +1799,22 @@ const aiEngineFetch = async (path: string, options: RequestInit = {}, plan?: str
 
 export const askAgent = async (
     question: string,
-    options: { plan?: string; conversationId?: string } = {},
+    // Conservé pour la compatibilité des appelants; l'identité/plan vient désormais du JWT côté NestJS.
+    _options: { plan?: string; conversationId?: string } = {},
 ): Promise<AiEngineChatResponse> => {
-    return aiEngineFetch('/chat', {
+    return apiFetch(`${BASE_URL}/ai/ask`, {
         method: 'POST',
-        body: JSON.stringify({ message: question, conversation_id: options.conversationId }),
-    }, options.plan);
+        body: JSON.stringify({ question }),
+    });
 };
+
+export interface AiTierStatus {
+    tier: 'pro' | 'free' | string;
+    persistentIntelligence: boolean;
+    engine?: { available?: boolean; dataSource?: string | null } | null;
+}
+
+export const aiStatus = async (): Promise<AiTierStatus> => apiFetch(`${BASE_URL}/ai/status`, { method: 'GET' });
 
 export const aiEngine = {
     status: async (): Promise<AiEngineStatus> => aiEngineFetch('/status', { method: 'GET' }),
@@ -1756,18 +1830,6 @@ export const aiEngine = {
     deleteMemory: async (id: string): Promise<void> => {
         await aiEngineFetch(`/memory/${encodeURIComponent(id)}`, { method: 'DELETE' });
     },
-    proposeAction: async (request: { type: string; title: string; payload: Record<string, any> }): Promise<AiAction> => (
-        aiEngineFetch('/actions/propose', {
-            method: 'POST',
-            body: JSON.stringify(request),
-        })
-    ),
-    approveAction: async (id: string): Promise<{ action: AiAction }> => (
-        aiEngineFetch(`/actions/${encodeURIComponent(id)}/approve`, { method: 'POST' })
-    ),
-    rejectAction: async (id: string): Promise<{ action: AiAction }> => (
-        aiEngineFetch(`/actions/${encodeURIComponent(id)}/reject`, { method: 'POST' })
-    ),
     risks: async (plan: string = 'pro', includeEmpty: boolean = false): Promise<any> => (
         aiEngineFetch(`/risks?include_empty=${includeEmpty ? 'true' : 'false'}`, { method: 'GET' }, plan)
     ),
@@ -1777,6 +1839,28 @@ export const aiEngine = {
     stockForecast: async (plan: string = 'pro', includeEmpty: boolean = false): Promise<any> => (
         aiEngineFetch(`/forecast/stock?include_empty=${includeEmpty ? 'true' : 'false'}`, { method: 'GET' }, plan)
     ),
+    analytics: async (
+        granularity: 'day' | 'week' | 'month' = 'day',
+        plan: string = localStorage.getItem('organization_plan') || 'free',
+    ): Promise<AnalyticsOverview> => {
+        try {
+            const data = await aiEngineFetch(
+                `/analytics/overview?granularity=${granularity}`,
+                { method: 'GET' },
+                plan,
+            );
+            return { ...data, source: data.source === 'mock_fallback' ? 'api' : 'engine' };
+        } catch {
+            // Repli local : recalcule à partir de l'historique et du stock déjà accessibles.
+            const [logs, filaments] = await Promise.all([
+                api.getAllConsumptionHistory(),
+                api.getAll(),
+            ]);
+            const list = Array.isArray(logs) ? logs : ((logs as any)?.logs ?? []);
+            const { computeLocalAnalytics } = await import('./utils/analytics-fallback');
+            return computeLocalAnalytics(list as any, (filaments || []) as any, granularity);
+        }
+    },
     replenishmentSuggestions: async (
         itemId: string,
         plan: string = 'pro',
@@ -1789,3 +1873,16 @@ export const aiEngine = {
     },
 };
 
+export const aiActions = {
+    list: async (status?: string) =>
+        apiFetch(`${BASE_URL}/ai/actions${status ? `?status=${encodeURIComponent(status)}` : ''}`, { method: 'GET' }),
+    approve: async (id: string) =>
+        apiFetch(`${BASE_URL}/ai/actions/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
+    reject: async (id: string) =>
+        apiFetch(`${BASE_URL}/ai/actions/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
+};
+
+export const aiMemories = {
+    list: async () => apiFetch(`${BASE_URL}/ai/memories`, { method: 'GET' }),
+    delete: async (id: string) => apiFetch(`${BASE_URL}/ai/memories/${encodeURIComponent(id)}/delete`, { method: 'POST' }),
+};

@@ -515,6 +515,22 @@ export default function GCodeAnalysisDialog({
                 }
             }
 
+            // Apprentissage gcode->bobine (no-op côté serveur si plan non éligible)
+            const mappings: Array<{ hint: any; filamentId: number }> = [];
+            for (const plate of platesToLog) {
+                for (const u of plate.usage) {
+                    if (u.filamentId && !u.selectedOption?.isGroup) {
+                        const hint =
+                            inspectionResult?.toolHints?.[u.tool] ||
+                            inspectionResult?.matching?.toolSuggestions?.find((s: any) => s.tool === u.tool)?.hint;
+                        if (hint) mappings.push({ hint, filamentId: u.filamentId });
+                    }
+                }
+            }
+            if (mappings.length > 0) {
+                try { await api.confirmGcodeMappings(mappings); } catch { /* apprentissage best-effort */ }
+            }
+
             // 2. Add to Project BOM (if projectId provided)
             if (projectId) {
                 const bomUpdates: Record<number, number> = {}; // filamentId -> totalWeight

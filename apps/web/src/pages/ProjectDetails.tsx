@@ -12,10 +12,11 @@ import {
     ArrowBack, Edit, Delete, Save, Add, CloudUpload, Calculate,
     History as HistoryIcon, Layers, Inventory2, Description,
     CloudDownload, Assessment, Star, StarBorder, Print as PrinterIcon,
-    AttachMoney, FolderOpen, EventNote, Refresh
+    AttachMoney, FolderOpen, EventNote, Refresh, OpenInNew, Percent,
+    ShoppingCart
 } from '@mui/icons-material';
 import { api, ProjectStatus, BASE_URL } from '../api';
-import type { Project, ProjectItem, ProjectFile, Filament } from '../api';
+import type { Project, ProjectItem, ProjectFile, Filament, ProjectExternalItem, ProjectOverheadRate } from '../api';
 import ProjectItemModal from '../components/ProjectItemModal';
 import GCodeAnalysisDialog from '../components/GCodeAnalysisDialog';
 import ProjectEditDialog from '../components/ProjectEditDialog';
@@ -41,6 +42,17 @@ export default function ProjectDetailsPage() {
     const [loading, setLoading] = useState(true);
     const [tabValue, setTabValue] = useState(0);
     const [isAddMaterialOpen, setIsAddMaterialOpen] = useState(false);
+    const [editingProjectItem, setEditingProjectItem] = useState<ProjectItem | null>(null);
+    const [isAddExternalItemOpen, setIsAddExternalItemOpen] = useState(false);
+    const [editingExternalItem, setEditingExternalItem] = useState<ProjectExternalItem | null>(null);
+    const [externalItemData, setExternalItemData] = useState({
+        title: '',
+        external_ref: '',
+        source: 'AliExpress',
+        url: '',
+        unit_price: '',
+        quantity: '1'
+    });
     const [simConfig, setSimConfig] = useState<{ [key: string]: number | string }>({
         print_time_h: 0,
         labor_time_h: 0,
@@ -63,6 +75,7 @@ export default function ProjectDetailsPage() {
     const [tags, setTags] = useState<string[]>([]);
     const [targetPrice, setTargetPrice] = useState<number | string>('');
     const [notes, setNotes] = useState('');
+    const [overheadRates, setOverheadRates] = useState<ProjectOverheadRate[]>([]);
     const [savingGlobal, setSavingGlobal] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [deleteConsumptions, setDeleteConsumptions] = useState(false);
@@ -212,24 +225,28 @@ export default function ProjectDetailsPage() {
             setTags(project.tags || []);
             setTargetPrice(project.target_selling_price || '');
             setNotes(project.notes || '');
+            const rawOverheadRates = project.overhead_rates as any;
+            let parsedOverheadRates = rawOverheadRates;
+            if (typeof rawOverheadRates === 'string') {
+                try {
+                    parsedOverheadRates = JSON.parse(rawOverheadRates);
+                } catch {
+                    parsedOverheadRates = [];
+                }
+            }
+            setOverheadRates(Array.isArray(parsedOverheadRates) ? parsedOverheadRates : []);
         }
     }, [project]);
 
-    // Derived States
-    const totalCost = project ? (
-        (project.items?.reduce((acc, item) => {
-            // Simulating price fetching logic roughly
-            const pricePerG = (item.filament?.price || 20) / (item.filament?.weightInitial || 1000);
-            return acc + (item.weight_required_g * pricePerG);
-        }, 0) || 0) +
-        (Number(simConfig.print_time_h) * Number(simConfig.machine_hourly_rate)) +
-        (Number(simConfig.labor_time_h) * Number(simConfig.labor_hourly_rate)) +
-        (Number(simConfig.print_time_h) * Number(simConfig.printer_power_kw) * Number(simConfig.electricity_cost_kwh)) +
-        Number(simConfig.misc_costs)
-    ) : 0;
+    const toFiniteNumber = (value: unknown) => {
+        const numberValue = Number(value);
+        return Number.isFinite(numberValue) ? numberValue : 0;
+    };
 
-    const marginValue = targetPrice ? (Number(targetPrice) - totalCost) : 0;
-    const marginPercent = targetPrice ? ((marginValue / Number(targetPrice)) * 100) : 0;
+    const sanitizedOverheadRates = overheadRates.map((rate) => ({
+        label: (rate.label || '').trim(),
+        percentage: toFiniteNumber(rate.percentage)
+    })).filter((rate) => rate.label || rate.percentage !== 0);
 
     const handleSaveGlobal = async () => {
         if (!project) return;
@@ -238,7 +255,8 @@ export default function ProjectDetailsPage() {
             await api.updateProject(project.id, {
                 tags,
                 target_selling_price: Number(targetPrice) || 0,
-                notes
+                notes,
+                overhead_rates: sanitizedOverheadRates
             });
             // Also save sim config as currently implemented separately but good to sync
             await loadProject(project.id, true);
@@ -271,14 +289,15 @@ export default function ProjectDetailsPage() {
         try {
             setSavingSim(true);
             await api.updateProject(project.id, {
-                print_time_seconds: Number(simConfig.print_time_h) * 3600,
-                labor_time_seconds: Number(simConfig.labor_time_h) * 3600,
-                machine_hourly_rate: Number(simConfig.machine_hourly_rate),
-                labor_hourly_rate: Number(simConfig.labor_hourly_rate),
-                printer_power_kw: Number(simConfig.printer_power_kw),
-                electricity_cost_kwh: Number(simConfig.electricity_cost_kwh),
-                misc_costs: Number(simConfig.misc_costs),
-                target_selling_price: Number(targetPrice) || 0
+                print_time_seconds: toFiniteNumber(simConfig.print_time_h) * 3600,
+                labor_time_seconds: toFiniteNumber(simConfig.labor_time_h) * 3600,
+                machine_hourly_rate: toFiniteNumber(simConfig.machine_hourly_rate),
+                labor_hourly_rate: toFiniteNumber(simConfig.labor_hourly_rate),
+                printer_power_kw: toFiniteNumber(simConfig.printer_power_kw),
+                electricity_cost_kwh: toFiniteNumber(simConfig.electricity_cost_kwh),
+                misc_costs: toFiniteNumber(simConfig.misc_costs),
+                target_selling_price: toFiniteNumber(targetPrice),
+                overhead_rates: sanitizedOverheadRates
             });
             await loadProject(project.id, true);
             setSnackbar({ open: true, message: t('projects.configSaved', 'Configuration saved successfully'), severity: 'success' });
@@ -371,6 +390,64 @@ export default function ProjectDetailsPage() {
         } catch (error) {
             console.error(error);
         }
+    };
+
+    const resetExternalItemForm = () => {
+        setEditingExternalItem(null);
+        setExternalItemData({ title: '', external_ref: '', source: 'AliExpress', url: '', unit_price: '', quantity: '1' });
+    };
+
+    const openExternalItemEditor = (item: ProjectExternalItem) => {
+        setEditingExternalItem(item);
+        setExternalItemData({
+            title: item.title || '',
+            external_ref: item.external_ref || '',
+            source: item.source || '',
+            url: item.url || '',
+            unit_price: String(item.unit_price ?? ''),
+            quantity: String(item.quantity ?? '1')
+        });
+        setIsAddExternalItemOpen(true);
+    };
+
+    const handleSaveExternalItem = async () => {
+        if (!project || !externalItemData.title.trim()) return;
+        try {
+            const payload = {
+                title: externalItemData.title.trim(),
+                external_ref: externalItemData.external_ref.trim() || null,
+                source: externalItemData.source.trim() || null,
+                url: externalItemData.url.trim() || null,
+                unit_price: Number(externalItemData.unit_price) || 0,
+                quantity: Number(externalItemData.quantity) || 0
+            };
+            if (editingExternalItem) {
+                await api.updateProjectExternalItem(project.id, editingExternalItem.id, payload);
+            } else {
+                await api.addProjectExternalItem(project.id, payload);
+            }
+            setIsAddExternalItemOpen(false);
+            resetExternalItemForm();
+            await loadProject(project.id, true);
+        } catch (error) {
+            console.error(error);
+            setSnackbar({ open: true, message: t('projects.externalItemSaveError', 'Failed to save external item'), severity: 'error' });
+        }
+    };
+
+    const handleRemoveExternalItem = async (itemId: number) => {
+        if (!project || !confirm(t('common.confirmDelete'))) return;
+        try {
+            await api.removeProjectExternalItem(project.id, itemId);
+            await loadProject(project.id, true);
+        } catch (error) {
+            console.error(error);
+            setSnackbar({ open: true, message: t('projects.externalItemDeleteError', 'Failed to remove external item'), severity: 'error' });
+        }
+    };
+
+    const updateOverheadRate = (index: number, patch: Partial<ProjectOverheadRate>) => {
+        setOverheadRates(prev => prev.map((rate, i) => i === index ? { ...rate, ...patch } : rate));
     };
 
     const handleFileSelect = (file: File) => {
@@ -598,7 +675,12 @@ export default function ProjectDetailsPage() {
         return sum + ((item.weight_required_g / weight) * price);
     }, 0);
 
-    const displayCost = project.global_cost || totalMaterialCost;
+    const totalExternalItemsCost = (project.externalItems || []).reduce(
+        (sum, item) => sum + (Number(item.unit_price) || 0) * (Number(item.quantity) || 0),
+        0
+    );
+
+    const displayCost = totalMaterialCost + totalExternalItemsCost;
 
     return (
         <Box sx={{ p: 3, maxWidth: 1600, mx: 'auto' }}>
@@ -750,11 +832,10 @@ export default function ProjectDetailsPage() {
                                                     <Box sx={{ width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'primary.main', color: 'white', mb: 1 }}>
                                                         <AttachMoney fontSize="small" />
                                                     </Box>
-                                                    <Typography variant="caption" color="text.secondary">{t('projects.totalCost')}</Typography>
+                                                    <Typography variant="caption" color="text.secondary">{t('projects.bomSubtotal')}</Typography>
                                                     <Typography variant="h5" fontWeight="bold" color="primary.main">
                                                         {displayCost > 0 ? `${displayCost.toFixed(2)}€` : '-'}
                                                     </Typography>
-                                                    {!project.global_cost && displayCost > 0 && <Typography variant="caption" color="text.disabled">({t('projects.estMaterial')})</Typography>}
                                                 </CardContent>
                                             </Card>
                                         </Grid>
@@ -894,15 +975,59 @@ export default function ProjectDetailsPage() {
                                 <Box>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
                                         <Typography variant="h6">{t('projects.bom')}</Typography>
-                                        <Button
-                                            startIcon={<Add />}
-                                            variant="outlined"
-                                            size="small"
-                                            onClick={() => setIsAddMaterialOpen(true)}
-                                        >
-                                            {t('projects.addMaterial')}
-                                        </Button>
+                                        <Box display="flex" gap={1}>
+                                            <Button
+                                                startIcon={<Add />}
+                                                variant="outlined"
+                                                size="small"
+                                                onClick={() => {
+                                                    setEditingProjectItem(null);
+                                                    setIsAddMaterialOpen(true);
+                                                }}
+                                            >
+                                                {t('projects.addMaterial')}
+                                            </Button>
+                                            <Button
+                                                startIcon={<ShoppingCart />}
+                                                variant="contained"
+                                                size="small"
+                                                onClick={() => {
+                                                    resetExternalItemForm();
+                                                    setIsAddExternalItemOpen(true);
+                                                }}
+                                            >
+                                                {t('projects.addExternalItem', 'External item')}
+                                            </Button>
+                                        </Box>
                                     </Box>
+                                    <Grid container spacing={2} sx={{ mb: 2 }}>
+                                        <Grid size={{ xs: 12, md: 4 }}>
+                                            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                                                <Typography variant="caption" color="text.secondary">{t('projects.materialCost', 'Material cost')}</Typography>
+                                                <Typography variant="h5" fontWeight="bold">{totalMaterialCost.toFixed(2)}€</Typography>
+                                                {totalMaterialCost === 0 && (project.items?.length || 0) > 0 && (
+                                                    <Typography variant="caption" color="warning.main">
+                                                        {t('projects.missingFilamentPrice', 'Filament price missing')}
+                                                    </Typography>
+                                                )}
+                                            </Paper>
+                                        </Grid>
+                                        <Grid size={{ xs: 12, md: 4 }}>
+                                            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                                                <Typography variant="caption" color="text.secondary">{t('projects.externalItems', 'External items')}</Typography>
+                                                <Typography variant="h5" fontWeight="bold">{totalExternalItemsCost.toFixed(2)}€</Typography>
+                                            </Paper>
+                                        </Grid>
+                                        <Grid size={{ xs: 12, md: 4 }}>
+                                            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                                                <Typography variant="caption" color="text.secondary">{t('projects.bomSubtotal', 'BOM subtotal')}</Typography>
+                                                <Typography variant="h5" fontWeight="bold" color="primary.main">{(totalMaterialCost + totalExternalItemsCost).toFixed(2)}€</Typography>
+                                            </Paper>
+                                        </Grid>
+                                    </Grid>
+                                    <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
+                                        {t('projects.printMaterials', 'Print materials')}
+                                    </Typography>
                                     <List>
                                         {((project.items as ProjectItem[]) || []).map((item) => (
                                             <ListItem
@@ -910,6 +1035,16 @@ export default function ProjectDetailsPage() {
                                                 divider
                                                 secondaryAction={
                                                     <>
+                                                        <IconButton
+                                                            edge="end"
+                                                            aria-label="edit"
+                                                            onClick={() => {
+                                                                setEditingProjectItem(item);
+                                                                setIsAddMaterialOpen(true);
+                                                            }}
+                                                        >
+                                                            <Edit fontSize="small" />
+                                                        </IconButton>
                                                         <IconButton edge="end" aria-label="delete" onClick={() => handleRemoveItem(item.id)} color="error">
                                                             <Delete fontSize="small" />
                                                         </IconButton>
@@ -929,6 +1064,61 @@ export default function ProjectDetailsPage() {
                                             <Typography color="text.secondary">{t('projects.noItems')}</Typography>
                                         )}
                                     </List>
+
+                                    <Typography variant="subtitle2" fontWeight="bold" sx={{ mt: 3, mb: 1 }}>
+                                        {t('projects.externalReferences', 'External references')}
+                                    </Typography>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+                                        <Table size="small">
+                                            <TableHead>
+                                                <TableRow sx={{ bgcolor: 'action.hover' }}>
+                                                    <TableCell>{t('projects.itemTitle', 'Title')}</TableCell>
+                                                    <TableCell>{t('projects.reference', 'Reference')}</TableCell>
+                                                    <TableCell>{t('projects.source', 'Source')}</TableCell>
+                                                    <TableCell align="right">{t('projects.unitPrice', 'Unit price')}</TableCell>
+                                                    <TableCell align="right">{t('projects.quantity', 'Qty')}</TableCell>
+                                                    <TableCell align="right">{t('projects.total', 'Total')}</TableCell>
+                                                    <TableCell align="right">{t('common.actions', 'Actions')}</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {((project.externalItems as ProjectExternalItem[]) || []).map((item) => (
+                                                    <TableRow key={item.id}>
+                                                        <TableCell>{item.title}</TableCell>
+                                                        <TableCell>{item.external_ref || '-'}</TableCell>
+                                                        <TableCell>{item.source || '-'}</TableCell>
+                                                        <TableCell align="right">{Number(item.unit_price).toFixed(2)}€</TableCell>
+                                                        <TableCell align="right">{Number(item.quantity).toString()}</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 700 }}>
+                                                            {((Number(item.unit_price) || 0) * (Number(item.quantity) || 0)).toFixed(2)}€
+                                                        </TableCell>
+                                                        <TableCell align="right">
+                                                            <IconButton size="small" onClick={() => openExternalItemEditor(item)}>
+                                                                <Edit fontSize="small" />
+                                                            </IconButton>
+                                                            {item.url && (
+                                                                <IconButton size="small" component="a" href={item.url} target="_blank" rel="noreferrer">
+                                                                    <OpenInNew fontSize="small" />
+                                                                </IconButton>
+                                                            )}
+                                                            <IconButton size="small" color="error" onClick={() => handleRemoveExternalItem(item.id)}>
+                                                                <Delete fontSize="small" />
+                                                            </IconButton>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                                {(!project.externalItems || project.externalItems.length === 0) && (
+                                                    <TableRow>
+                                                        <TableCell colSpan={7} align="center">
+                                                            <Typography color="text.secondary" sx={{ py: 2 }}>
+                                                                {t('projects.noExternalItems', 'No external references yet.')}
+                                                            </Typography>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
                                 </Box>
                             )}
 
@@ -1086,11 +1276,20 @@ export default function ProjectDetailsPage() {
                             })()}
 
                             {tabValue === 4 && (() => {
-                                const machineCost = Number(simConfig.print_time_h) * Number(simConfig.machine_hourly_rate);
-                                const laborCost = Number(simConfig.labor_time_h) * Number(simConfig.labor_hourly_rate);
-                                const electricityCost = Number(simConfig.print_time_h) * Number(simConfig.printer_power_kw) * Number(simConfig.electricity_cost_kwh);
-                                const otherCosts = machineCost + laborCost + electricityCost + Number(simConfig.misc_costs);
-                                const grandTotal = totalMaterialCost + otherCosts;
+                                const machineCost = toFiniteNumber(simConfig.print_time_h) * toFiniteNumber(simConfig.machine_hourly_rate);
+                                const laborCost = toFiniteNumber(simConfig.labor_time_h) * toFiniteNumber(simConfig.labor_hourly_rate);
+                                const electricityCost = toFiniteNumber(simConfig.print_time_h) * toFiniteNumber(simConfig.printer_power_kw) * toFiniteNumber(simConfig.electricity_cost_kwh);
+                                const otherCosts = machineCost + laborCost + electricityCost + toFiniteNumber(simConfig.misc_costs);
+                                const subtotalBeforeOverheads = totalMaterialCost + totalExternalItemsCost + otherCosts;
+                                const overheadLines = sanitizedOverheadRates.map((rate) => ({
+                                    ...rate,
+                                    amount: subtotalBeforeOverheads * rate.percentage / 100
+                                }));
+                                const overheadTotal = overheadLines.reduce((sum, rate) => sum + rate.amount, 0);
+                                const grandTotal = subtotalBeforeOverheads + overheadTotal;
+                                const sellingPriceValue = toFiniteNumber(targetPrice);
+                                const simulatorMarginValue = sellingPriceValue > 0 ? sellingPriceValue - grandTotal : 0;
+                                const simulatorMarginPercent = sellingPriceValue > 0 ? (simulatorMarginValue / sellingPriceValue) * 100 : 0;
 
                                 return (
                                     <Box>
@@ -1140,7 +1339,7 @@ export default function ProjectDetailsPage() {
                                                 <TableHead>
                                                     <TableRow sx={{ bgcolor: 'action.hover' }}>
                                                         <TableCell sx={{ fontWeight: 'bold' }}>{t('common.type', 'Type')}</TableCell>
-                                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>{t('consumption.amount', 'Amount')}</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>{t('projects.amount')}</TableCell>
                                                     </TableRow>
                                                 </TableHead>
                                                 <TableBody>
@@ -1148,6 +1347,12 @@ export default function ProjectDetailsPage() {
                                                         <TableCell>{t('projects.materialCost')}</TableCell>
                                                         <TableCell align="right">{totalMaterialCost.toFixed(2)}€</TableCell>
                                                     </TableRow>
+                                                    {totalExternalItemsCost > 0 && (
+                                                        <TableRow>
+                                                            <TableCell>{t('projects.externalItems', 'External items')}</TableCell>
+                                                            <TableCell align="right">{totalExternalItemsCost.toFixed(2)}€</TableCell>
+                                                        </TableRow>
+                                                    )}
                                                     {machineCost > 0 && (
                                                         <TableRow>
                                                             <TableCell>{t('projects.machineCostLine')} ({simConfig.print_time_h}h × {simConfig.machine_hourly_rate}€/h)</TableCell>
@@ -1172,6 +1377,12 @@ export default function ProjectDetailsPage() {
                                                             <TableCell align="right">{Number(simConfig.misc_costs).toFixed(2)}€</TableCell>
                                                         </TableRow>
                                                     )}
+                                                    {overheadLines.map((rate, index) => (
+                                                        <TableRow key={`${rate.label}-${index}`}>
+                                                            <TableCell>{rate.label || t('projects.overhead', 'Charge')} ({rate.percentage.toFixed(2)}%)</TableCell>
+                                                            <TableCell align="right">{rate.amount.toFixed(2)}€</TableCell>
+                                                        </TableRow>
+                                                    ))}
                                                     <TableRow sx={{ bgcolor: 'action.hover' }}>
                                                         <TableCell sx={{ fontWeight: 'bold' }}>{t('projects.totalCost')}</TableCell>
                                                         <TableCell align="right" sx={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{grandTotal.toFixed(2)}€</TableCell>
@@ -1195,17 +1406,17 @@ export default function ProjectDetailsPage() {
                                                     />
                                                 </Grid>
                                                 <Grid size={{ xs: 12, md: 8 }}>
-                                                    {targetPrice && Number(targetPrice) > 0 ? (
+                                                    {sellingPriceValue > 0 ? (
                                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                                                             <Box>
                                                                 <Typography variant="caption" color="text.secondary">{t('projects.margin')}</Typography>
-                                                                <Typography variant="h5" fontWeight="bold" color={marginValue > 0 ? "success.main" : "error.main"}>
-                                                                    {marginValue.toFixed(2)}€
+                                                                <Typography variant="h5" fontWeight="bold" color={simulatorMarginValue > 0 ? "success.main" : "error.main"}>
+                                                                    {simulatorMarginValue.toFixed(2)}€
                                                                 </Typography>
                                                             </Box>
                                                             <Chip
-                                                                label={`${marginPercent.toFixed(1)}%`}
-                                                                color={marginPercent > 20 ? 'success' : marginPercent > 0 ? 'warning' : 'error'}
+                                                                label={`${simulatorMarginPercent.toFixed(1)}%`}
+                                                                color={simulatorMarginPercent > 20 ? 'success' : simulatorMarginPercent > 0 ? 'warning' : 'error'}
                                                                 size="small"
                                                                 sx={{ fontWeight: 'bold', fontSize: '0.9rem' }}
                                                             />
@@ -1303,6 +1514,66 @@ export default function ProjectDetailsPage() {
                                                         value={simConfig.misc_costs}
                                                         onChange={(e) => setSimConfig({ ...simConfig, misc_costs: normalizeNumericInput(e.target.value) })}
                                                     />
+                                                </Grid>
+                                                <Grid size={{ xs: 12 }}>
+                                                    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'action.hover' }}>
+                                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                                                            <Typography variant="subtitle2" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                                <Percent fontSize="small" />
+                                                                {t('projects.overheads', 'Charges / taxes')}
+                                                            </Typography>
+                                                            <Button
+                                                                size="small"
+                                                                startIcon={<Add />}
+                                                                onClick={() => setOverheadRates(prev => [...prev, { label: '', percentage: 0 }])}
+                                                            >
+                                                                {t('common.add', 'Add')}
+                                                            </Button>
+                                                        </Box>
+                                                        {overheadRates.map((rate, index) => (
+                                                            <Grid container spacing={1.5} key={index} sx={{ mb: 1 }}>
+                                                                <Grid size={{ xs: 12, md: 7 }}>
+                                                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                                                        {t('projects.overheadLabel', 'Label')}
+                                                                    </Typography>
+                                                                    <TextField
+                                                                        size="small"
+                                                                        fullWidth
+                                                                        placeholder={t('projects.overheadLabel', 'Label')}
+                                                                        value={rate.label}
+                                                                        onChange={(e) => updateOverheadRate(index, { label: e.target.value })}
+                                                                    />
+                                                                </Grid>
+                                                                <Grid size={{ xs: 8, md: 3 }}>
+                                                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                                                        {t('projects.percentage', 'Percentage')}
+                                                                    </Typography>
+                                                                    <TextField
+                                                                        size="small"
+                                                                        fullWidth
+                                                                        type="text"
+                                                                        placeholder="0"
+                                                                        value={Number.isFinite(Number(rate.percentage)) ? String(rate.percentage) : '0'}
+                                                                        onChange={(e) => updateOverheadRate(index, { percentage: toFiniteNumber(normalizeNumericInput(e.target.value)) })}
+                                                                        InputProps={{ endAdornment: <Typography variant="caption">%</Typography> }}
+                                                                    />
+                                                                </Grid>
+                                                                <Grid size={{ xs: 4, md: 2 }} sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', pb: 0.25 }}>
+                                                                    <IconButton
+                                                                        color="error"
+                                                                        onClick={() => setOverheadRates(prev => prev.filter((_, i) => i !== index))}
+                                                                    >
+                                                                        <Delete fontSize="small" />
+                                                                    </IconButton>
+                                                                </Grid>
+                                                            </Grid>
+                                                        ))}
+                                                        {overheadRates.length === 0 && (
+                                                            <Typography variant="body2" color="text.secondary">
+                                                                {t('projects.noOverheads', 'No percentage charges configured.')}
+                                                            </Typography>
+                                                        )}
+                                                    </Paper>
                                                 </Grid>
                                             </Grid>
                                         </Paper>
@@ -1436,12 +1707,106 @@ export default function ProjectDetailsPage() {
                 project && (
                     <ProjectItemModal
                         open={isAddMaterialOpen}
-                        onClose={() => setIsAddMaterialOpen(false)}
+                        onClose={() => {
+                            setIsAddMaterialOpen(false);
+                            setEditingProjectItem(null);
+                        }}
                         projectId={project.id}
-                        onSuccess={() => loadProject(project.id)}
+                        onSuccess={() => {
+                            setEditingProjectItem(null);
+                            loadProject(project.id);
+                        }}
+                        item={editingProjectItem}
                     />
                 )
             }
+
+            <Dialog
+                open={isAddExternalItemOpen}
+                onClose={() => {
+                    setIsAddExternalItemOpen(false);
+                    resetExternalItemForm();
+                }}
+                maxWidth="sm"
+                fullWidth
+            >
+                <DialogTitle>{editingExternalItem ? t('projects.editExternalItem', 'Edit external item') : t('projects.addExternalItem', 'Add external item')}</DialogTitle>
+                <DialogContent sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <TextField
+                        label={t('common.title', 'Title')}
+                        fullWidth
+                        size="small"
+                        value={externalItemData.title}
+                        onChange={(e) => setExternalItemData({ ...externalItemData, title: e.target.value })}
+                    />
+                    <Grid container spacing={2}>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField
+                                label={t('projects.reference', 'Reference')}
+                                fullWidth
+                                size="small"
+                                value={externalItemData.external_ref}
+                                onChange={(e) => setExternalItemData({ ...externalItemData, external_ref: e.target.value })}
+                            />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField
+                                label={t('projects.source', 'Source')}
+                                fullWidth
+                                size="small"
+                                value={externalItemData.source}
+                                onChange={(e) => setExternalItemData({ ...externalItemData, source: e.target.value })}
+                                placeholder="AliExpress, MakerWorld..."
+                            />
+                        </Grid>
+                    </Grid>
+                    <TextField
+                        label={t('projects.link', 'Link')}
+                        fullWidth
+                        size="small"
+                        value={externalItemData.url}
+                        onChange={(e) => setExternalItemData({ ...externalItemData, url: e.target.value })}
+                    />
+                    <Grid container spacing={2}>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField
+                                label={t('projects.unitPrice', 'Unit price')}
+                                fullWidth
+                                size="small"
+                                type="text"
+                                value={externalItemData.unit_price}
+                                onChange={(e) => setExternalItemData({ ...externalItemData, unit_price: normalizeNumericInput(e.target.value) })}
+                            />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField
+                                label={t('projects.quantity', 'Quantity')}
+                                fullWidth
+                                size="small"
+                                type="text"
+                                value={externalItemData.quantity}
+                                onChange={(e) => setExternalItemData({ ...externalItemData, quantity: normalizeNumericInput(e.target.value) })}
+                            />
+                        </Grid>
+                    </Grid>
+                    <Typography variant="body2" color="text.secondary">
+                        {t('projects.externalItemPreview', 'Line total')}: {((Number(externalItemData.unit_price) || 0) * (Number(externalItemData.quantity) || 0)).toFixed(2)}€
+                    </Typography>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => {
+                        setIsAddExternalItemOpen(false);
+                        resetExternalItemForm();
+                    }} color="inherit">{t('common.cancel')}</Button>
+                    <Button
+                        onClick={handleSaveExternalItem}
+                        variant="contained"
+                        disabled={!externalItemData.title.trim()}
+                    >
+                        {editingExternalItem ? t('common.save') : t('common.add')}
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             {/* Upload Choice Dialog */}
             <Dialog open={uploadChoiceOpen} onClose={() => setUploadChoiceOpen(false)}>

@@ -35,4 +35,13 @@ export class UserNotificationPreference {
 
   @Column({ default: true })
   notifyOnInvitation: boolean;
+
+  @Column({ default: true })
+  notifyOnAiRupture: boolean;
+
+  @Column({ default: true })
+  notifyOnAiAchat: boolean;
+
+  @Column({ default: true })
+  notifyOnAiProjet: boolean;
 }

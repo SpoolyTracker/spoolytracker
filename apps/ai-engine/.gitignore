@@ -1,0 +1,12 @@
+# Artefacts Python générés
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environnements virtuels
+.venv/
+venv/
+
+# Base mémoire locale du moteur (générée à l'exécution)
+*.sqlite3

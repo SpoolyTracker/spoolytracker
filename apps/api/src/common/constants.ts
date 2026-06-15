@@ -1,13 +1,13 @@
 export const PLAN_LIMITS = {
   free: {
-    maxSpoolsPerOrg: 20,
+    maxSpoolsPerOrg: 30,
     maxMembersPerOrg: 3,
     maxProjectsPerOrg: 5,
     maxFileUploadSizeMb: 20,
     maxFilesPerProject: 3,
   },
   pro: {
-    maxSpoolsPerOrg: 50,
+    maxSpoolsPerOrg: 100,
     maxMembersPerOrg: 20,
     maxProjectsPerOrg: 50,
     maxFileUploadSizeMb: 100,

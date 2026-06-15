@@ -12,6 +12,7 @@ import { CompleteSignupModal } from './components/modals/CompleteSignupModal';
 
 
 import DashboardPage from './pages/Dashboard';
+import AnalyticsPage from './pages/Analytics';
 import InventoryPage from './pages/Inventory';
 import ScanPage from './pages/Scan';
 import SettingsPage from './pages/Settings';
@@ -67,6 +68,7 @@ function AppRoutes() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/resolve-quota" element={<ProtectedRoute><ResolveQuotaPage /></ProtectedRoute>} />
       <Route path="/dashboard" element={<ProtectedRoute><QuotaGuard><MainLayout><DashboardPage /></MainLayout></QuotaGuard></ProtectedRoute>} />
+      <Route path="/analytics" element={<ProtectedRoute><QuotaGuard><MainLayout><AnalyticsPage /></MainLayout></QuotaGuard></ProtectedRoute>} />
       <Route path="/inventory" element={<ProtectedRoute><QuotaGuard><MainLayout><InventoryPage /></MainLayout></QuotaGuard></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><QuotaGuard><MainLayout><ScanPage /></MainLayout></QuotaGuard></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><QuotaGuard><MainLayout><SettingsPage /></MainLayout></QuotaGuard></ProtectedRoute>} />
