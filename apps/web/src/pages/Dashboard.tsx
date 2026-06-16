@@ -26,7 +26,7 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ConsumptionLog, Filament } from '../api';
-import { api } from '../api';
+import { api, BASE_URL } from '../api';
 import AnalyticsCard from '../components/AnalyticsCard';
 import { AiInsightBanner } from '../components/AiInsightBanner';
 import ColorIndicator from '../components/ColorIndicator';
@@ -318,7 +318,7 @@ export default function DashboardPage() {
                                     {!organization?.trialEndsAt && (
                                         <Button variant="contained" color="primary" onClick={async () => {
                                             try {
-                                                const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/stripe/create-checkout-session`, {
+                                                const res = await fetch(`${BASE_URL}/stripe/create-checkout-session`, {
                                                     method: 'POST',
                                                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'x-organization-id': String(organization?.id) },
                                                     body: JSON.stringify({ plan: 'pro', organizationId: organization?.id })

@@ -28,6 +28,7 @@ import { SupportModule } from './support/support.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { PublicApiModule } from './public-api/public-api.module';
+import { BootstrapAdminModule } from './bootstrap/bootstrap-admin.module';
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { PublicApiModule } from './public-api/public-api.module';
     ApiKeysModule,
     IntegrationsModule,
     PublicApiModule,
+    BootstrapAdminModule,
   ],
   controllers: [AppController, UploadsController, PublicController],
   providers: [AppService],

@@ -1,4 +1,8 @@
 import type { AnalyticsOverview } from './types/analytics';
+import {
+    API_URL as RUNTIME_API_URL,
+    AI_ENGINE_URL as RUNTIME_AI_ENGINE_URL,
+} from './runtimeConfig';
 
 export interface Brand {
     id: number;
@@ -293,8 +297,8 @@ export interface Project {
     labor_hourly_rate?: number;
 }
 
-export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-export const AI_ENGINE_URL = import.meta.env.VITE_AI_ENGINE_URL || 'http://localhost:8000';
+export const BASE_URL = RUNTIME_API_URL;
+export const AI_ENGINE_URL = RUNTIME_AI_ENGINE_URL;
 const API_URL = `${BASE_URL}/filaments`;
 const AUTH_URL = `${BASE_URL}/auth`;
 const REF_URL = `${BASE_URL}/reference-data`;

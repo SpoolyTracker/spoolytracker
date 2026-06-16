@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../api';
 import type { UserOrganization } from '../api';
+import { API_URL as BASE_URL } from '../runtimeConfig';
 import { useTranslation } from 'react-i18next';
 
 export function OrganizationSwitcher() {
@@ -67,7 +68,6 @@ export function OrganizationSwitcher() {
         if (!newOrgName.trim()) return;
 
         try {
-            const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
             const response = await fetch(`${BASE_URL}/organizations`, {
                 method: 'POST',
                 headers: {

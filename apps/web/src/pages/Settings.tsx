@@ -8,6 +8,7 @@ import { SubscriptionHistory } from '../components/SubscriptionHistory';
 import { Box } from '@mui/material';
 import { Building, User, Users, Eye, EyeOff, Download, Printer as PrinterIcon, Nfc, Trash2, Bell, Settings as SettingsIcon, KeyRound, Copy, FileCode2 } from 'lucide-react';
 import { api, BASE_URL, type ApiKeySummary } from '../api';
+import { GOOGLE_CLIENT_ID } from '../runtimeConfig';
 import { SecureImage } from '../components/SecureImage';
 import PageHeader from '../components/PageHeader';
 
@@ -91,7 +92,6 @@ export default function SettingsPage() {
     }, []);
 
     const fetchMembers = async () => {
-        const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
         const response = await fetch(`${BASE_URL}/organizations/${currentOrgId}/users`, {
             headers: { 'Authorization': `Bearer ${token}`, 'x-organization-id': currentOrgId },
         });
@@ -142,7 +142,7 @@ export default function SettingsPage() {
     const [deletingAccount, setDeletingAccount] = useState(false);
 
     const handleLinkGoogle = () => {
-        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+        const clientId = GOOGLE_CLIENT_ID;
         if (!clientId || !window.google) {
             alert(t('settings.googleUnavailable', 'Google Sign-In is not available on this page.'));
             return;

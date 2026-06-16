@@ -28,7 +28,7 @@ import {
     Chip,
     createFilterOptions
 } from '@mui/material';
-import { api } from '../api';
+import { api, BASE_URL } from '../api';
 import type { Filament } from '../api';
 import ColorIndicator from './ColorIndicator';
 import { t } from 'i18next';
@@ -137,7 +137,7 @@ export default function GCodeAnalysisDialog({
 
         // Fetch Organization for Limits
         const orgId = localStorage.getItem('organization_id') || '1';
-        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/organizations/${orgId}`, {
+        fetch(`${BASE_URL}/organizations/${orgId}`, {
             headers: { 'Authorization': `Bearer ${token}`, 'x-organization-id': orgId },
         }).then(r => r.ok ? r.json() : null)
             .then(setOrganization)
