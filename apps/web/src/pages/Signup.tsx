@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { api } from '../api';
-import { GOOGLE_CLIENT_ID } from '../runtimeConfig';
+import { getEnv } from '../runtimeEnv';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,7 +29,7 @@ export default function SignupPage() {
 
     useEffect(() => {
         // Initialize Google Identity Services
-        const clientId = GOOGLE_CLIENT_ID;
+        const clientId = getEnv('VITE_GOOGLE_CLIENT_ID', '');
         if (clientId && window.google) {
             const buttonDiv = document.getElementById("google-signup-button");
             if (buttonDiv) {

@@ -206,6 +206,66 @@ def test_chat_endpoint_returns_pydantic_response() -> None:
     assert response.requires_confirmation is False
 
 
+def test_detects_calibration_and_computes_volumetric_flow() -> None:
+    response = _ask(
+        "Calibration du debit volumetrique max: depart 5, max 20, pas 0.5, hauteur propre 22 mm"
+    )
+
+    assert response.intent == Intent.CALIBRATION
+    # observed = min(5 + 22 * 0.5, 20) = 16 ; recommended = 16 * 95% = 15.2
+    assert response.data["observed_mm3_s"] == 16.0
+    assert response.data["recommended_mm3_s"] == 15.2
+    assert response.data["tower_height_mm"] == 30.0
+
+
+def test_calibration_bounds_observed_to_test_maximum() -> None:
+    # hauteur propre tres haute -> observe doit etre borne au max du test
+    response = _ask(
+        "debit volumetrique depart 5 max 12 pas 0.5 hauteur propre 40"
+    )
+
+    assert response.intent == Intent.CALIBRATION
+    assert response.data["observed_mm3_s"] == 12.0
+
+
+def test_calibration_proposes_action_when_single_filament_in_context() -> None:
+    response = asyncio.run(
+        FreeAssistantAgent().run(
+            "debit volumetrique depart 5 max 20 pas 0.5 hauteur propre 22",
+            context={
+                "data_source": "main_api",
+                "active_context": {"mode": "calibration", "filament_ids": ["pla-black"]},
+                "stock_items": [
+                    StockItem(
+                        id="pla-black",
+                        name="PLA Black",
+                        brand="BambuLab",
+                        material="PLA",
+                        color="Black",
+                        weight_initial_g=1000,
+                        weight_remaining_g=740,
+                    ),
+                ],
+                "projects": [],
+            },
+        )
+    )
+
+    assert response.intent == Intent.CALIBRATION
+    assert response.requires_confirmation is True
+    action = response.proposed_actions[0]
+    assert action["type"] == "update_filament_calibration"
+    assert action["payload"]["filament_id"] == "pla-black"
+    assert action["payload"]["max_volumetric_speed_mm3_s"] == 15.2
+
+
+def test_capabilities_lists_calibration() -> None:
+    response = capabilities()
+    intent_names = {intent.name for intent in response.intents}
+
+    assert "calibration" in intent_names
+
+
 def test_capabilities_lists_free_tools() -> None:
     response = capabilities()
     tool_names = {tool.name for tool in response.tools}

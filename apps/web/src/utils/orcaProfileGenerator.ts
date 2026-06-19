@@ -34,6 +34,10 @@ export const generateOrcaProfile = (filament: Filament) => {
     const chamberTemp = filament.chamberTempMax || filament.chamberTempMin || 0;
     const hasZHop = hasNumber(filament.retractionZHopMm);
     const hasPressureAdvance = hasNumber(filament.kFactor);
+    const maxVolumetricSpeed = hasNumber(filament.maxVolumetricSpeedMm3S)
+        ? filament.maxVolumetricSpeedMm3S
+        : 12;
+    const flowRatio = hasNumber(filament.flowRatio) ? filament.flowRatio : 0.98;
     const conditionalTemperatureNotes = (filament.conditionalTemperatureRules || [])
         .map((rule) => {
             const speedMin = rule.speedMinMmS != null ? `${rule.speedMinMmS}` : '';
@@ -114,13 +118,13 @@ export const generateOrcaProfile = (filament: Filament) => {
         "filament_end_gcode": ["; filament end gcode \nM106 P3 S0\n"],
         "filament_extruder_compatibility": ["0"],
         "filament_extruder_variant": ["Direct Drive Standard"], // Assuming direct drive, safest default?
-        "filament_flow_ratio": ["0.98"],
+        "filament_flow_ratio": [String(flowRatio)],
         "filament_flush_temp": ["0"],
         "filament_flush_volumetric_speed": ["0"],
         "filament_id": profileId, // String, not array
         "filament_is_support": ["0"],
         "filament_long_retractions_when_cut": ["nil"],
-        "filament_max_volumetric_speed": ["12"],
+        "filament_max_volumetric_speed": [String(maxVolumetricSpeed)],
         "filament_metal_stickiness": ["None"],
         "filament_minimal_purge_on_wipe_tower": ["15"],
         "filament_notes": notes,

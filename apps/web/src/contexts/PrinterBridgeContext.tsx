@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import type { ReactNode } from 'react';
+import { getEnv } from '../runtimeEnv';
 
 // Printer status types
 export interface PrinterStatus {
@@ -37,8 +38,8 @@ interface PrinterBridgeContextType {
 const PrinterBridgeContext = createContext<PrinterBridgeContextType | undefined>(undefined);
 
 // WebSocket URL from environment variables
-const WS_URL = import.meta.env.VITE_BRIDGE_WS_URL || 'ws://localhost:9000';
-const HTTP_URL = import.meta.env.VITE_BRIDGE_HTTP_URL || 'http://localhost:9000';
+const WS_URL = getEnv('VITE_BRIDGE_WS_URL', 'ws://localhost:9000');
+const HTTP_URL = getEnv('VITE_BRIDGE_HTTP_URL', 'http://localhost:9000');
 
 interface PrinterBridgeProviderProps {
     children: ReactNode;

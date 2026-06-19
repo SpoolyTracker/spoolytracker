@@ -8,7 +8,8 @@ from src.tools.models import ProjectItem, ProjectMaterialRequirement, StockItem
 
 def _is_hex_color(value: str) -> bool:
     value = value.strip()
-    if not value.startswith("#") or len(value) not in {4, 7}:
+    # Accept #RGB, #RGBA, #RRGGBB and #RRGGBBAA (with optional alpha channel).
+    if not value.startswith("#") or len(value) not in {4, 5, 7, 9}:
         return False
     return all(char in "0123456789abcdefABCDEF" for char in value[1:])
 
@@ -31,6 +32,17 @@ class AppFilamentSnapshot(BaseModel):
     low_stock_threshold_type: str = "PERCENTAGE"
     price: float | None = None
     vendor: str | None = None
+    nozzle_temp_min_c: float | None = None
+    nozzle_temp_max_c: float | None = None
+    bed_temp_min_c: float | None = None
+    bed_temp_max_c: float | None = None
+    print_speed_min_mm_s: float | None = None
+    print_speed_max_mm_s: float | None = None
+    max_volumetric_speed_mm3_s: float | None = None
+    flow_ratio: float | None = None
+    k_factor: float | None = None
+    density_g_cm3: float | None = None
+    diameter_mm: float | None = None
 
     @property
     def forecastable_remaining_g(self) -> float:
@@ -63,6 +75,9 @@ class AppFilamentSnapshot(BaseModel):
                 if self.low_stock_threshold_type == "PERCENTAGE" and self.low_stock_threshold is not None
                 else 20
             ),
+            max_volumetric_speed_mm3_s=self.max_volumetric_speed_mm3_s,
+            flow_ratio=self.flow_ratio,
+            k_factor=self.k_factor,
         )
 
 
@@ -113,6 +128,7 @@ class AppDataSnapshot(BaseModel):
     source: str = "mock_fallback"
     organization_id: str
     user_id: str | None = None
+    active_context: dict | None = None
     settings: AppOrganizationSettings
     filaments: list[AppFilamentSnapshot]
     consumptions: list[AppConsumptionSnapshot]

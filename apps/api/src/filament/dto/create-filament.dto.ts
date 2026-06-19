@@ -190,6 +190,14 @@ export class CreateFilamentDto {
 
   @IsNumber()
   @IsOptional()
+  maxVolumetricSpeedMm3S?: number | null;
+
+  @IsNumber()
+  @IsOptional()
+  flowRatio?: number | null;
+
+  @IsNumber()
+  @IsOptional()
   densityGcm3?: number | null;
 
   @IsNumber()

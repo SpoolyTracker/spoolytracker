@@ -134,6 +134,7 @@ async def chat(
             "plan": plan.plan,
             "stock_items": forecast_service.stock_items,
             "projects": forecast_service.projects,
+            "active_context": request.snapshot.get("active_context") if request.snapshot else None,
             "data_source": forecast_service.data_source,
         },
     )
@@ -310,6 +311,10 @@ def capabilities() -> CapabilitiesResponse:
                 name="project_question",
                 description="Estimation des besoins matiere d'un projet.",
             ),
+            Capability(
+                name="calibration",
+                description="Aide aux calibrations filament et calcul du debit volumetrique max.",
+            ),
             Capability(name="general_question", description="Question generale sur l'assistant."),
         ],
         tools=[
@@ -327,6 +332,10 @@ def capabilities() -> CapabilitiesResponse:
             Capability(
                 name="pro_forecasting",
                 description="Mode Pro: previsions de rupture, risques, anomalies et notifications.",
+            ),
+            Capability(
+                name="calibration_calculator",
+                description="Calcule depart + hauteur mesuree x pas, avec marge de securite.",
             ),
         ],
         limitations=[

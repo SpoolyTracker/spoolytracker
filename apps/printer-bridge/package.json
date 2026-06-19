@@ -8,7 +8,7 @@
         "start-headless": "node headless.js",
         "dist": "electron-builder",
         "dist-headless": "pkg headless.js --targets node18-win-x64 --output dist-headless/spoolyprinter-console.exe",
-        "postinstall": "electron-builder install-app-deps"
+        "postinstall": "electron-builder install-app-deps || exit 0"
     },
     "pkg": {
         "assets": [

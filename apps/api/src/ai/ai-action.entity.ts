@@ -13,6 +13,7 @@ export enum AiActionType {
   CREATE_ALERT = 'create_alert',
   PREPARE_NOTIFICATION = 'prepare_notification',
   PROPOSE_SUPPLIER_ORDER = 'propose_supplier_order',
+  UPDATE_FILAMENT_CALIBRATION = 'update_filament_calibration',
 }
 
 export enum AiActionStatus {
