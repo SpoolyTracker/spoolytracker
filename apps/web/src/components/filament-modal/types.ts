@@ -36,6 +36,8 @@ export interface FilamentFormData {
     retractionNotes: string;
     conditionalTemperatureRules: ConditionalTemperatureRule[];
     kFactor: number | string;
+    maxVolumetricSpeedMm3S: number | string;
+    flowRatio: number | string;
     densityGcm3: number | string;
     diameterMm: number | string;
     lowStockThreshold: number | string | null;

@@ -226,6 +226,12 @@ export class Filament {
   @Column('float', { nullable: true })
   kFactor: number;
 
+  @Column('float', { nullable: true })
+  maxVolumetricSpeedMm3S: number;
+
+  @Column('float', { nullable: true })
+  flowRatio: number;
+
   @Column('float', { nullable: true, default: 1.24 })
   densityGcm3: number;
 

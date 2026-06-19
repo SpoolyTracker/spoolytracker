@@ -1,8 +1,5 @@
 import type { AnalyticsOverview } from './types/analytics';
-import {
-    API_URL as RUNTIME_API_URL,
-    AI_ENGINE_URL as RUNTIME_AI_ENGINE_URL,
-} from './runtimeConfig';
+import { getEnv } from './runtimeEnv';
 
 export interface Brand {
     id: number;
@@ -194,6 +191,8 @@ export interface Filament {
     retractionNotes?: string;
     conditionalTemperatureRules?: ConditionalTemperatureRule[];
     kFactor?: number;
+    maxVolumetricSpeedMm3S?: number;
+    flowRatio?: number;
     densityGcm3?: number;
     diameterMm?: number;
     lowStockThreshold?: number;
@@ -297,8 +296,19 @@ export interface Project {
     labor_hourly_rate?: number;
 }
 
-export const BASE_URL = RUNTIME_API_URL;
-export const AI_ENGINE_URL = RUNTIME_AI_ENGINE_URL;
+export interface AiClientContext {
+    mode?: 'auto' | 'calibration' | 'stock' | 'project';
+    source?: 'passive' | 'active' | 'mixed';
+    filamentIds?: number[];
+    projectId?: number | null;
+    page?: {
+        path: string;
+        kind?: string;
+    };
+}
+
+export const BASE_URL = getEnv('VITE_API_URL', 'http://localhost:3000');
+export const AI_ENGINE_URL = getEnv('VITE_AI_ENGINE_URL', 'http://localhost:8000');
 const API_URL = `${BASE_URL}/filaments`;
 const AUTH_URL = `${BASE_URL}/auth`;
 const REF_URL = `${BASE_URL}/reference-data`;
@@ -1804,11 +1814,11 @@ const aiEngineFetch = async (path: string, options: RequestInit = {}, plan?: str
 export const askAgent = async (
     question: string,
     // Conservé pour la compatibilité des appelants; l'identité/plan vient désormais du JWT côté NestJS.
-    _options: { plan?: string; conversationId?: string } = {},
+    options: { plan?: string; conversationId?: string; clientContext?: AiClientContext } = {},
 ): Promise<AiEngineChatResponse> => {
     return apiFetch(`${BASE_URL}/ai/ask`, {
         method: 'POST',
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, clientContext: options.clientContext }),
     });
 };
 

@@ -1,6 +1,7 @@
 
 import { createContext, useContext, useRef, useState, useCallback } from 'react';
 import type { NFCBridgeStatus, NFCTagEvent } from '../types/nfc';
+import { getEnv } from '../runtimeEnv';
 
 interface NFCBridgeContextType extends NFCBridgeStatus {
     reconnect: () => void;
@@ -29,7 +30,7 @@ export const NFCBridgeProvider = ({ children }: { children: React.ReactNode }) =
             return; // Already connecting or connected
         }
 
-        const ws = new WebSocket('ws://localhost:8999');
+        const ws = new WebSocket(getEnv('VITE_BRIDGE_WS_URL', 'ws://localhost:8999'));
         wsRef.current = ws;
 
         ws.onopen = () => {

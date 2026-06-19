@@ -6,9 +6,9 @@ import { OrganizationSwitcher } from '../components/OrganizationSwitcher';
 import { PendingInvitations } from '../components/PendingInvitations';
 import { SubscriptionHistory } from '../components/SubscriptionHistory';
 import { Box } from '@mui/material';
-import { Building, User, Users, Eye, EyeOff, Download, Printer as PrinterIcon, Nfc, Trash2, Bell, Settings as SettingsIcon, KeyRound, Copy, FileCode2 } from 'lucide-react';
+import { Building, User, Users, Eye, EyeOff, Download, Printer as PrinterIcon, Nfc, Trash2, Bell, Settings as SettingsIcon, KeyRound, Copy, FileCode2, Monitor } from 'lucide-react';
 import { api, BASE_URL, type ApiKeySummary } from '../api';
-import { GOOGLE_CLIENT_ID } from '../runtimeConfig';
+import { getEnv } from '../runtimeEnv';
 import { SecureImage } from '../components/SecureImage';
 import PageHeader from '../components/PageHeader';
 
@@ -40,6 +40,8 @@ export default function SettingsPage() {
     const { startTour } = useTour();
     const { t } = useTranslation();
     const currentOrgId = localStorage.getItem('organization_id') || '1';
+    // True when the dashboard runs inside the Electron desktop app (no point offering its own download there).
+    const isDesktopApp = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent);
     const [activeTab, setActiveTab] = useState<'organization' | 'members' | 'profile' | 'integrations' | 'downloads' | 'notifications'>('organization');
     const [organization, setOrganization] = useState<any>(null);
     const [orgSettings, setOrgSettings] = useState<{ lowStockThreshold: number | null, lowStockThresholdType: string, aiAlertCooldownHours?: number | null }>({ lowStockThreshold: null, lowStockThresholdType: 'GRAMS' });
@@ -142,7 +144,7 @@ export default function SettingsPage() {
     const [deletingAccount, setDeletingAccount] = useState(false);
 
     const handleLinkGoogle = () => {
-        const clientId = GOOGLE_CLIENT_ID;
+        const clientId = getEnv('VITE_GOOGLE_CLIENT_ID', '');
         if (!clientId || !window.google) {
             alert(t('settings.googleUnavailable', 'Google Sign-In is not available on this page.'));
             return;
@@ -2117,6 +2119,54 @@ export default function SettingsPage() {
                     </p>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                        {/* Desktop App (all-in-one) Card — hidden when already running inside the desktop app */}
+                        {!isDesktopApp && (
+                        <div style={{
+                            border: '1px solid #c7d2fe',
+                            borderRadius: '12px',
+                            padding: '20px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '16px',
+                            backgroundColor: '#eef2ff'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{
+                                    width: '40px', height: '40px', borderRadius: '8px',
+                                    backgroundColor: '#4f46e5', color: 'white',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}>
+                                    <Monitor size={24} />
+                                </div>
+                                <div>
+                                    <h3 style={{ fontSize: '16px', fontWeight: '600' }}>{t('settings.downloads.desktopApp', 'Application Desktop (tout-en-un)')}</h3>
+                                    <span style={{ fontSize: '12px', color: '#6b7280', backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}>
+                                        {t('settings.downloads.windows')}
+                                    </span>
+                                </div>
+                            </div>
+                            <p style={{ fontSize: '14px', color: '#6b7280', flex: 1 }}>
+                                {t('settings.downloads.desktopAppDesc', 'Le tableau de bord et les bridges NFC/imprimante réunis dans une seule application installable. Aucun bridge séparé à lancer.')}
+                            </p>
+                            <a
+                                href={`${BASE_URL}/uploads/clients/SpoolyTracker-Setup.exe`}
+                                download
+                                style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                                    padding: '10px',
+                                    backgroundColor: '#4f46e5',
+                                    color: 'white',
+                                    textDecoration: 'none',
+                                    borderRadius: '6px',
+                                    fontWeight: '500',
+                                    transition: 'background-color 0.2s'
+                                }}
+                            >
+                                <Download size={16} />
+                                {t('settings.downloads.downloadDesktop', 'Télécharger (Windows)')}
+                            </a>
+                        </div>
+                        )}
                         {/* Printer Bridge Card */}
                         <div style={{
                             border: '1px solid #e5e7eb',

@@ -29,6 +29,7 @@ class Intent(StrEnum):
     LOW_STOCK = "low_stock"
     CONSUMPTION_ENTRY = "consumption_entry"
     PROJECT_QUESTION = "project_question"
+    CALIBRATION = "calibration"
     PURCHASE_QUESTION = "purchase_question"
     GENERAL_QUESTION = "general_question"
     PRO_FEATURE = "pro_feature"
@@ -57,6 +58,17 @@ class FreeAssistantAgent(BaseAgent):
     async def run(self, prompt: str, context: dict | None = None) -> AgentResult:
         context = context or {}
         detection = self.detect_intent(prompt)
+        active_context = context.get("active_context") or {}
+        if self._is_context_selection_message(prompt):
+            if active_context.get("mode") == "calibration":
+                return self._answer_context_ack(context, expected_use="calibration")
+            detection = IntentDetection(intent=Intent.GENERAL_QUESTION, confidence=0.9)
+        if (
+            detection.intent == Intent.GENERAL_QUESTION
+            and active_context.get("mode") == "calibration"
+            and self._has_any(prompt.lower(), ["depart", "max", "pas", "hauteur", "propre", "pression", "pressure", "flow"])
+        ):
+            detection = IntentDetection(intent=Intent.CALIBRATION, confidence=0.9)
 
         if detection.intent == Intent.PURCHASE_QUESTION:
             return self._answer_purchase(context)
@@ -72,6 +84,9 @@ class FreeAssistantAgent(BaseAgent):
 
         if detection.intent == Intent.PROJECT_QUESTION:
             return self._answer_project(prompt, context)
+
+        if detection.intent == Intent.CALIBRATION:
+            return self._answer_calibration(prompt, context)
 
         if detection.intent == Intent.STOCK_SUMMARY:
             return self._answer_stock(prompt, context)
@@ -136,6 +151,34 @@ class FreeAssistantAgent(BaseAgent):
             ],
         ):
             return IntentDetection(intent=Intent.LOW_STOCK, confidence=0.95)
+
+        if self._has_any(
+            text,
+            [
+                "calibration",
+                "calibrer",
+                "calibre",
+                "debit volumetrique",
+                "volumetric",
+                "flow tower",
+                "hauteur propre",
+                "depart ",
+                "pas ",
+                "temperature tower",
+                "tour de temperature",
+                "sur extrusion",
+                "sous extrusion",
+                "under extrusion",
+                "over extrusion",
+                "k-factor",
+                "pressure advance",
+                "retraction",
+            ],
+        ):
+            return IntentDetection(intent=Intent.CALIBRATION, confidence=0.9)
+
+        if self._looks_like_volumetric_flow_follow_up(text):
+            return IntentDetection(intent=Intent.CALIBRATION, confidence=0.88)
 
         if self._has_any(
             text,
@@ -439,6 +482,211 @@ class FreeAssistantAgent(BaseAgent):
             },
         )
 
+    def _answer_calibration(self, prompt: str, context: dict) -> AgentResult:
+        flow = self._extract_volumetric_flow_calibration(prompt)
+        if flow:
+            start, maximum, step, clean_height, safety_percent = flow
+            observed = min(start + clean_height * step, maximum)
+            recommended = observed * safety_percent / 100
+            tower_height = (maximum - start) / step if step > 0 else 0
+            active_items = self._active_stock_items(context)
+            candidates = self._find_consumption_candidates(prompt, active_items) if active_items else []
+            if not candidates:
+                candidates = active_items or self._find_consumption_candidates(prompt, self._stock_items(context) or [])
+            item = candidates[0] if len(candidates) == 1 else None
+            proposed_actions = []
+            action_note = ""
+            if item:
+                proposed_actions.append(
+                    ProposedAction(
+                        type="update_filament_calibration",
+                        label=(
+                            f"Appliquer {recommended:.2f} mm3/s comme debit volumetrique max "
+                            f"sur {self._display_stock_item(item)}"
+                        ),
+                        payload={
+                            "filament_id": item.id,
+                            "max_volumetric_speed_mm3_s": round(recommended, 2),
+                            "calibration_type": "max_volumetric_speed",
+                        },
+                    ).model_dump()
+                )
+                action_note = (
+                    f"\n\nJ'ai identifie la bobine **{self._display_stock_item(item)}**. "
+                    "Je peux proposer l'application de cette valeur apres validation."
+                )
+            elif len(candidates) > 1:
+                action_note = (
+                    "\n\nPlusieurs bobines sont dans le contexte actif. Garde une seule bobine "
+                    "selectionnee, ou precise la marque, la matiere ou la couleur."
+                )
+            elif self._stock_items(context):
+                action_note = (
+                    "\n\nJe n'ai pas identifie la bobine cible. Ajoute son nom, sa marque, "
+                    "sa matiere ou sa couleur pour que je propose la modification automatiquement."
+                )
+            warning = ""
+            if clean_height > tower_height:
+                warning = (
+                    "\n\nAttention: la hauteur mesuree depasse la hauteur utile de la tour. "
+                    "J'ai donc borne le resultat a la valeur max du test."
+                )
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    "Calcul de debit volumetrique max:\n"
+                    f"- depart: {start:g} mm3/s\n"
+                    f"- maximum du test: {maximum:g} mm3/s\n"
+                    f"- pas: {step:g} mm3/s par mm\n"
+                    f"- hauteur propre mesuree: {clean_height:g} mm\n\n"
+                    f"Debit observe: **{observed:.2f} mm3/s**.\n"
+                    f"Valeur recommandee avec marge {safety_percent:g}%: "
+                    f"**{recommended:.2f} mm3/s**.\n\n"
+                    "Formule: depart + hauteur propre x pas. "
+                    f"La tour couvre environ {tower_height:.2f} mm de hauteur utile."
+                    f"{warning}"
+                    f"{action_note}"
+                ),
+                requires_confirmation=bool(proposed_actions),
+                proposed_actions=proposed_actions,
+                data={
+                    "calibration_type": "max_volumetric_speed",
+                    "start_mm3_s": start,
+                    "max_mm3_s": maximum,
+                    "step_mm3_s_per_mm": step,
+                    "clean_height_mm": clean_height,
+                    "observed_mm3_s": round(observed, 2),
+                    "recommended_mm3_s": round(recommended, 2),
+                    "safety_percent": safety_percent,
+                    "tower_height_mm": round(tower_height, 2),
+                    "source": context.get("data_source", "mock_fallback"),
+                },
+            )
+
+        if self._has_any(prompt.lower(), ["photo", "image", "upload", "vision"]):
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    "Je peux deja aider a interpreter une calibration, mais ce chat ne recoit pas encore "
+                    "la photo directement. Pour l'analyse image, il faut brancher un endpoint vision dedie: "
+                    "type de tour, plage de temperature, et zone observee. Ensuite je pourrai renvoyer "
+                    "une hypothese comme temperature optimale, sur/sous extrusion, stringing ou refroidissement."
+                ),
+                data={
+                    "calibration_type": "vision_planned",
+                    "supported_future_observations": [
+                        "temperature_tower",
+                        "max_volumetric_speed",
+                        "flow_rate",
+                        "pressure_advance",
+                        "retraction",
+                        "over_under_extrusion",
+                    ],
+                },
+            )
+
+        return AgentResult(
+            intent=Intent.CALIBRATION,
+            answer=(
+                "Je peux t'aider pour les calibrations filament. Pour le debit volumetrique max, donne-moi "
+                "par exemple: depart 5, max 20, pas 0.5, hauteur propre 22 mm. "
+                "Je calculerai la valeur observee et une valeur recommandee avec marge."
+            ),
+            data={
+                "supported_calibrations": [
+                    "max_volumetric_speed",
+                    "temperature_tower",
+                    "flow_rate",
+                    "pressure_advance",
+                    "retraction",
+                    "over_under_extrusion",
+                ],
+            },
+        )
+
+    def _answer_context_ack(self, context: dict, expected_use: str | None = None) -> AgentResult:
+        active_items = self._active_stock_items(context)
+        project = self._active_project(context)
+        parts = []
+        if active_items:
+            labels = ", ".join(self._display_stock_item(item) for item in active_items[:3])
+            if len(active_items) > 3:
+                labels += f", +{len(active_items) - 3}"
+            parts.append(f"bobine(s): {labels}")
+        if project:
+            parts.append(f"projet: {project.name}")
+        if not parts:
+            return AgentResult(
+                intent=Intent.GENERAL_QUESTION,
+                answer=(
+                    "Je n'ai pas encore de bobine ou projet dans le contexte actif. "
+                    "Selectionne une bobine ou un projet dans l'encart de la fenetre IA, puis renvoie ta demande."
+                ),
+                data={"active_context": context.get("active_context")},
+            )
+        usage = (
+            " Pour une calibration deja calculee, renvoie simplement la ligne de mesure ou dis "
+            "`applique ce calcul`, et je proposerai la modification si une seule bobine est ciblee."
+            if expected_use == "calibration"
+            else ""
+        )
+        return AgentResult(
+            intent=Intent.GENERAL_QUESTION,
+            answer=f"Contexte actif pris en compte: {'; '.join(parts)}.{usage}",
+            data={"active_context": context.get("active_context")},
+        )
+
+    def _extract_volumetric_flow_calibration(
+        self,
+        prompt: str,
+    ) -> tuple[float, float, float, float, float] | None:
+        text = prompt.lower().replace(",", ".")
+        if not (
+            self._has_any(text, ["debit", "volumetric", "volumetrique"])
+            or self._looks_like_volumetric_flow_follow_up(text)
+        ):
+            return None
+
+        def find_value(labels: list[str]) -> float | None:
+            joined = "|".join(re.escape(label) for label in labels)
+            match = re.search(
+                rf"(?:{joined})\s*(?:=|:|a|de)?\s*(-?\d+(?:\.\d+)?)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            return float(match.group(1)) if match else None
+
+        start = find_value(["depart", "start", "valeur de depart"])
+        maximum = find_value(["max", "maximum", "valeur max", "valeur maximum"])
+        step = find_value(["pas", "step", "increment"])
+        clean_height = find_value(
+            [
+                "hauteur propre",
+                "hauteur",
+                "mesure",
+                "clean height",
+                "dernier propre",
+            ]
+        )
+        safety_percent = find_value(["marge", "securite", "safety"]) or 95
+
+        if start is None or maximum is None or step is None or clean_height is None:
+            numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", text)]
+            if len(numbers) >= 4:
+                start, maximum, step, clean_height = numbers[:4]
+
+        if (
+            start is None
+            or maximum is None
+            or step is None
+            or clean_height is None
+            or step <= 0
+            or maximum <= start
+        ):
+            return None
+
+        return start, maximum, step, clean_height, max(0, min(safety_percent, 100))
+
     def _answer_general(self, context: dict) -> AgentResult:
         is_pro = context.get("plan") == "pro"
         if is_pro:
@@ -486,6 +734,23 @@ class FreeAssistantAgent(BaseAgent):
     def _has_any(self, text: str, needles: list[str]) -> bool:
         return any(needle in text for needle in needles)
 
+    def _looks_like_volumetric_flow_follow_up(self, text: str) -> bool:
+        tokens = ["depart", "départ", "max", "pas", "hauteur", "propre"]
+        score = sum(1 for token in tokens if token in text)
+        return score >= 3 and len(re.findall(r"-?\d+(?:[,.]\d+)?", text)) >= 3
+
+    def _is_context_selection_message(self, prompt: str) -> bool:
+        text = prompt.lower()
+        if self._looks_like_volumetric_flow_follow_up(text):
+            return False
+        has_context_word = self._has_any(text, ["contexte", "selection", "sélection"])
+        has_action_word = self._has_any(
+            text,
+            ["saisi", "saisie", "saisir", "selectionne", "selectionnee", "sélectionné", "choisi"],
+        )
+        has_amount = re.search(r"\d+(?:[,.]\d+)?\s*(g|gr|grammes|kg)\b", text) is not None
+        return has_context_word and has_action_word and not has_amount
+
     def _memory_note(self, context: dict) -> str:
         memories = context.get("memories") or []
         if not memories:
@@ -509,6 +774,27 @@ class FreeAssistantAgent(BaseAgent):
     def _projects(self, context: dict) -> list[ProjectItem] | None:
         projects = context.get("projects")
         return projects if isinstance(projects, list) else None
+
+    def _active_stock_items(self, context: dict) -> list[StockItem]:
+        active_context = context.get("active_context") or {}
+        active_ids = {
+            str(item_id)
+            for item_id in active_context.get("filament_ids", [])
+            if item_id is not None
+        }
+        if not active_ids:
+            return []
+        return [item for item in (self._stock_items(context) or []) if item.id in active_ids]
+
+    def _active_project(self, context: dict) -> ProjectItem | None:
+        active_context = context.get("active_context") or {}
+        project_id = active_context.get("project_id")
+        if not project_id:
+            return None
+        for project in self._projects(context) or []:
+            if project.id == str(project_id):
+                return project
+        return None
 
     def _get_stock_summary(self, context: dict) -> StockSummaryResponse:
         items = self._stock_items(context)
@@ -552,7 +838,7 @@ class FreeAssistantAgent(BaseAgent):
         if projects is None or items is None:
             return estimate_project_materials(request)
 
-        project = self._find_project(request.query, projects)
+        project = self._active_project(context) or self._find_project(request.query, projects)
         if project is None:
             return ProjectEstimateResponse(project=None, estimates=[], overall_status="unknown")
 
@@ -589,9 +875,11 @@ class FreeAssistantAgent(BaseAgent):
 
         amount_g = request.amount_g or self._extract_amount_g(request.user_message)
         candidates = self._find_consumption_candidates(request.user_message, items)
+        if not candidates:
+            candidates = self._active_stock_items(context)
         item = candidates[0] if len(candidates) == 1 else None
         requested_project_name = self._extract_project_name(request.user_message)
-        project = self._find_project_exact(request.user_message, self._projects(context) or [])
+        project = self._find_project_exact(request.user_message, self._projects(context) or []) or self._active_project(context)
 
         if amount_g is None:
             return create_consumption_proposal(request)

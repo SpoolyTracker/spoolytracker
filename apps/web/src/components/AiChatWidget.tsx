@@ -15,8 +15,9 @@ import {
     TextField,
     Typography,
 } from '@mui/material';
-import { aiActions, aiEngine, askAgent, type AiEngineCapabilities, type AiMemoryRecord } from '../api';
+import { aiActions, aiEngine, api, askAgent, type AiClientContext, type AiEngineCapabilities, type AiMemoryRecord, type Filament, type Project } from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { getFilamentTitle } from '../utils/filament-utils';
 
 interface GatewayAction {
     id: string;
@@ -54,9 +55,17 @@ const QUICK_PROMPTS = [
     'Souviens-toi que je veux garder 2kg minimum de PLA noir',
 ];
 
+const AI_CONTEXT_MODES = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'calibration', label: 'Calibration' },
+    { value: 'stock', label: 'Stock' },
+    { value: 'project', label: 'Projet' },
+] as const;
+
 const sanitizeAiDisplayContent = (content: string) => (
     content
-        .replace(/\s*#(?:[0-9a-f]{3}|[0-9a-f]{6})\b/gi, '')
+        // Strip hex color codes (#RGB, #RGBA, #RRGGBB, #RRGGBBAA) so we never surface raw hex to the user.
+        .replace(/\s*#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})\b/gi, '')
         .replace(/\s*couleur personnalis(?:e|ee|ée|Ã©e)/gi, '')
         .replace(/[ \t]{2,}/g, ' ')
 );
@@ -69,6 +78,13 @@ export const AiChatWidget: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [capabilities, setCapabilities] = useState<AiEngineCapabilities | null>(null);
     const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
+    const [contextFilaments, setContextFilaments] = useState<Filament[]>([]);
+    const [contextProjects, setContextProjects] = useState<Project[]>([]);
+    const [contextLoading, setContextLoading] = useState(false);
+    const [contextLoaded, setContextLoaded] = useState(false);
+    const [selectedFilamentIds, setSelectedFilamentIds] = useState<number[]>([]);
+    const [selectedProjectId, setSelectedProjectId] = useState<number | ''>('');
+    const [contextMode, setContextMode] = useState<AiClientContext['mode']>('auto');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -83,8 +99,39 @@ export const AiChatWidget: React.FC = () => {
     }, [isOpen, messages.length]);
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isLoading]);
+        if (!isOpen || contextLoaded || contextLoading) return;
+        setContextLoading(true);
+        Promise.all([api.getAll(), api.getProjects()])
+            .then(([filaments, projects]) => {
+                setContextFilaments(Array.isArray(filaments) ? filaments : []);
+                setContextProjects(Array.isArray(projects) ? projects : []);
+            })
+            .catch(() => {
+                setContextFilaments([]);
+                setContextProjects([]);
+            })
+            .finally(() => {
+                setContextLoaded(true);
+                setContextLoading(false);
+            });
+    }, [isOpen, contextLoaded, contextLoading]);
+
+    useEffect(() => {
+        if (!isOpen || selectedProjectId !== '') return;
+        const match = window.location.pathname.match(/^\/projects\/(\d+)(?:\/|$)/);
+        if (match) {
+            setSelectedProjectId(Number(match[1]));
+        }
+    }, [isOpen, selectedProjectId]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        // Wait for the panel/messages to lay out, then pin to the latest message.
+        const raf = requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({ block: 'end' });
+        });
+        return () => cancelAnimationFrame(raf);
+    }, [isOpen, messages, isLoading]);
 
     if (!token) return null;
 
@@ -102,7 +149,7 @@ export const AiChatWidget: React.FC = () => {
         setIsLoading(true);
 
         try {
-            const res = await askAgent(effectiveText);
+            const res = await askAgent(effectiveText, { clientContext: buildClientContext() });
             const agentMsg: ChatMessage = {
                 id: (Date.now() + 1).toString(),
                 role: 'agent',
@@ -134,8 +181,50 @@ export const AiChatWidget: React.FC = () => {
         ? `LLM ${capabilities.llm.provider}${capabilities.llm.available ? '' : ' indisponible'}`
         : 'Moteur deterministe';
 
+    const toggleFilamentContext = (id: number) => {
+        setSelectedFilamentIds(prev => (
+            prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+        ));
+    };
+
+    const inferPageContext = (): AiClientContext['page'] => {
+        const path = window.location.pathname;
+        let kind = 'page';
+        if (path.startsWith('/projects/')) kind = 'project_detail';
+        else if (path === '/projects') kind = 'projects';
+        else if (path === '/inventory') kind = 'inventory';
+        else if (path === '/consumption') kind = 'consumption';
+        else if (path === '/analytics') kind = 'analytics';
+        return { path, kind };
+    };
+
+    const buildClientContext = (): AiClientContext => {
+        const hasActive = selectedFilamentIds.length > 0 || selectedProjectId !== '' || contextMode !== 'auto';
+        return {
+            mode: contextMode,
+            source: hasActive ? 'mixed' : 'passive',
+            filamentIds: selectedFilamentIds,
+            projectId: selectedProjectId === '' ? null : selectedProjectId,
+            page: inferPageContext(),
+        };
+    };
+
+    const selectedProject = contextProjects.find(project => project.id === selectedProjectId);
+    const selectedFilaments = contextFilaments.filter(filament => selectedFilamentIds.includes(filament.id));
+    const visibleFilaments = [
+        ...selectedFilaments,
+        ...contextFilaments.filter(filament => !selectedFilamentIds.includes(filament.id)).slice(0, Math.max(0, 8 - selectedFilaments.length)),
+    ];
+
     const gatewayActionStatusLabel = (s: string) =>
         s === 'executed' ? 'Execute' : s === 'rejected' ? 'Rejete' : s === 'failed' ? 'Echec' : s;
+
+    // Resolve the filament targeted by an action so we can show a color swatch instead of a raw hex code.
+    const findActionFilament = (action: GatewayAction): Filament | undefined => {
+        const filamentId = action.payload?.filament_id;
+        if (filamentId === undefined || filamentId === null) return undefined;
+        return contextFilaments.find(filament => String(filament.id) === String(filamentId));
+    };
 
     const updateGatewayActionInState = (actionId: string, patch: Partial<Pick<GatewayAction, 'status' | 'result' | 'failureReason'>>) => {
         setMessages(prev => prev.map(m => ({
@@ -151,6 +240,14 @@ export const AiChatWidget: React.FC = () => {
         try {
             const updated = await aiActions.approve(id);
             updateGatewayActionInState(id, { status: updated.status, result: updated.result, failureReason: updated.failureReason });
+            if (updated.status === 'executed') {
+                // The action mutated filament data server-side: refresh the inventory list and our
+                // own context so an "Editer" right after shows the applied value (no F5 needed).
+                window.dispatchEvent(new Event('inventory-updated'));
+                api.getAll().then(filaments => {
+                    if (Array.isArray(filaments)) setContextFilaments(filaments);
+                }).catch(() => undefined);
+            }
         } catch {
             updateGatewayActionInState(id, { status: 'failed' });
         }
@@ -216,6 +313,70 @@ export const AiChatWidget: React.FC = () => {
 
                     <Box sx={{ flex: 1, minHeight: 0, display: 'flex', bgcolor: 'rgba(15, 23, 42, 0.03)' }}>
                         <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                            <Box sx={{ p: 1.25, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
+                                <Stack spacing={1}>
+                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                        <TextField
+                                            select
+                                            size="small"
+                                            label="Contexte"
+                                            value={contextMode}
+                                            onChange={(e) => setContextMode(e.target.value as AiClientContext['mode'])}
+                                            sx={{ minWidth: { sm: 132 } }}
+                                        >
+                                            {AI_CONTEXT_MODES.map(mode => (
+                                                <MenuItem key={mode.value} value={mode.value}>{mode.label}</MenuItem>
+                                            ))}
+                                        </TextField>
+                                        <TextField
+                                            select
+                                            size="small"
+                                            label="Projet"
+                                            value={selectedProjectId}
+                                            onChange={(e) => setSelectedProjectId(e.target.value === '' ? '' : Number(e.target.value))}
+                                            sx={{ minWidth: 0, flex: 1 }}
+                                        >
+                                            <MenuItem value="">Page courante / aucun</MenuItem>
+                                            {contextProjects.map(project => (
+                                                <MenuItem key={project.id} value={project.id}>{project.name}</MenuItem>
+                                            ))}
+                                        </TextField>
+                                    </Stack>
+                                    <Stack direction="row" spacing={0.75} sx={{ overflowX: 'auto', pb: 0.25 }}>
+                                        {contextLoading ? (
+                                            <Chip size="small" label="Chargement contexte..." variant="outlined" />
+                                        ) : visibleFilaments.length > 0 ? (
+                                            visibleFilaments.map(filament => {
+                                                const selected = selectedFilamentIds.includes(filament.id);
+                                                return (
+                                                    <Chip
+                                                        key={filament.id}
+                                                        label={getFilamentTitle(filament)}
+                                                        clickable
+                                                        color={selected ? 'primary' : 'default'}
+                                                        variant={selected ? 'filled' : 'outlined'}
+                                                        onClick={() => toggleFilamentContext(filament.id)}
+                                                        onDelete={selected ? () => toggleFilamentContext(filament.id) : undefined}
+                                                        size="small"
+                                                        sx={{ minWidth: 'max-content', maxWidth: 210 }}
+                                                    />
+                                                );
+                                            })
+                                        ) : (
+                                            <Chip size="small" label="Contexte passif: page courante" variant="outlined" />
+                                        )}
+                                        {selectedProject && (
+                                            <Chip
+                                                size="small"
+                                                color="secondary"
+                                                label={`Projet: ${selectedProject.name}`}
+                                                onDelete={() => setSelectedProjectId('')}
+                                                sx={{ minWidth: 'max-content' }}
+                                            />
+                                        )}
+                                    </Stack>
+                                </Stack>
+                            </Box>
                             <Box sx={{ flex: 1, p: 2, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                                 {messages.map(msg => (
                                     <Box key={msg.id} sx={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
@@ -333,10 +494,47 @@ export const AiChatWidget: React.FC = () => {
                                                                 >
                                                                     <Stack spacing={1}>
                                                                         <Stack direction="row" spacing={0.75} alignItems="center">
-                                                                            <CheckCircle2 size={15} />
-                                                                            <Typography variant="caption" fontWeight={800}>
-                                                                                {action.label || `Action: ${action.type}`}
+                                                                            <Box sx={{ display: 'flex', flexShrink: 0 }}>
+                                                                                <CheckCircle2 size={15} />
+                                                                            </Box>
+                                                                            <Typography variant="caption" fontWeight={800} sx={{ flex: 1, minWidth: 0 }}>
+                                                                                {sanitizeAiDisplayContent(action.label || `Action: ${action.type}`)}
                                                                             </Typography>
+                                                                            {(() => {
+                                                                                const filament = findActionFilament(action);
+                                                                                if (!filament?.color) return null;
+                                                                                return (
+                                                                                    <Stack
+                                                                                        direction="row"
+                                                                                        spacing={0.5}
+                                                                                        alignItems="center"
+                                                                                        sx={{
+                                                                                            flexShrink: 0,
+                                                                                            px: 0.75,
+                                                                                            py: 0.25,
+                                                                                            borderRadius: 10,
+                                                                                            border: '1px solid',
+                                                                                            borderColor: 'divider',
+                                                                                            bgcolor: 'background.paper',
+                                                                                        }}
+                                                                                    >
+                                                                                        <Box
+                                                                                            sx={{
+                                                                                                width: 12,
+                                                                                                height: 12,
+                                                                                                borderRadius: '50%',
+                                                                                                bgcolor: filament.color,
+                                                                                                border: '1px solid',
+                                                                                                borderColor: 'divider',
+                                                                                                flexShrink: 0,
+                                                                                            }}
+                                                                                        />
+                                                                                        <Typography variant="caption" color="text.secondary">
+                                                                                            {filament.colorName || 'Couleur'}
+                                                                                        </Typography>
+                                                                                    </Stack>
+                                                                                );
+                                                                            })()}
                                                                         </Stack>
                                                                         {action.status === 'proposed' ? (
                                                                             <Stack direction="row" spacing={1}>
@@ -592,6 +790,23 @@ const normalizeFollowUp = (text: string, messages: ChatMessage[]): string => {
     const asksForDetails = normalized.includes('indique') || normalized.includes('detail') || normalized.includes('détail');
     if (asksForDetails && lastAgent?.intent === 'pro_risks') {
         return 'Quels stocks sont à risque ? Donne le détail des matériaux et projets à risque.';
+    }
+    const mentionsContext = normalized.includes('contexte') || normalized.includes('selection') || normalized.includes('sélection');
+    if (mentionsContext && lastAgent?.intent === 'calibration') {
+        const lastCalibrationInput = [...messages].reverse().find(message => {
+            const content = message.content.toLowerCase();
+            return message.role === 'user' && (
+                content.includes('depart') ||
+                content.includes('départ') ||
+                content.includes('hauteur propre') ||
+                content.includes('debit') ||
+                content.includes('débit') ||
+                content.includes('volumetric')
+            );
+        });
+        if (lastCalibrationInput) {
+            return `${lastCalibrationInput.content}\nContexte actif selectionne: propose l'application sur la bobine selectionnee si elle est unique.`;
+        }
     }
     return text;
 };

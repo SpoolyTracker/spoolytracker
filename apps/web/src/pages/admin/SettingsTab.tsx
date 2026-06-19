@@ -18,7 +18,7 @@ import { Save, Info, Eye, Edit3, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../../contexts/AuthContext';
-import { API_URL as BASE_URL } from '../../runtimeConfig';
+import { BASE_URL } from '../../api';
 
 export default function SettingsTab() {
     const { t } = useTranslation();

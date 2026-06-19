@@ -13,6 +13,9 @@ class StockItem(BaseModel):
     weight_initial_g: float = Field(ge=0)
     weight_remaining_g: float = Field(ge=0)
     low_stock_threshold_percent: float = Field(default=20, ge=0, le=100)
+    max_volumetric_speed_mm3_s: float | None = None
+    flow_ratio: float | None = None
+    k_factor: float | None = None
 
     @property
     def remaining_percent(self) -> float:

@@ -43,7 +43,10 @@ export class AiAgentController {
   }
 
   @Post('ask')
-  async askQuestion(@Request() req: any, @Body() body: { question: string }) {
+  async askQuestion(
+    @Request() req: any,
+    @Body() body: { question: string; clientContext?: any },
+  ) {
     if (!body.question) {
       throw new Error('Question is required');
     }
@@ -65,6 +68,7 @@ export class AiAgentController {
       req.user,
       ip,
       req.headers.authorization,
+      body.clientContext,
     );
   }
 

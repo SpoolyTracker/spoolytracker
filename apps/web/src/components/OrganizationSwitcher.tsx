@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../api';
+import { api, BASE_URL } from '../api';
 import type { UserOrganization } from '../api';
-import { API_URL as BASE_URL } from '../runtimeConfig';
 import { useTranslation } from 'react-i18next';
 
 export function OrganizationSwitcher() {

@@ -42,6 +42,17 @@ type AiContextUser = {
   systemRole?: string;
 };
 
+type AiClientContext = {
+  mode?: string;
+  source?: string;
+  filamentIds?: Array<number | string>;
+  projectId?: number | string | null;
+  page?: {
+    path?: string;
+    kind?: string;
+  };
+};
+
 @Injectable()
 export class AiAgentService {
   constructor(
@@ -67,8 +78,9 @@ export class AiAgentService {
     user: any,
     ip: string = '',
     authorization?: string,
+    clientContext?: AiClientContext,
   ): Promise<AgentResponse> {
-    const engineResponse = await this.askAiEngine(question, user, authorization);
+    const engineResponse = await this.askAiEngine(question, user, authorization, clientContext);
     if (engineResponse) {
       const plan = await this.resolveOrgPlan(user.organizationId);
       const eligible = hasPersistentIntelligence(plan, user);
@@ -142,6 +154,8 @@ export class AiAgentService {
         return this.handleFinancialStats(user);
       case 'feasible_projects':
         return this.handleFeasibleProjects(user);
+      case 'calibration':
+        return this.handleCalibration(question);
       case 'feedback':
         return this.handleFeedback(user, question, ip);
       case 'create_filament':
@@ -198,6 +212,7 @@ export class AiAgentService {
     question: string,
     user: AiContextUser,
     authorization?: string,
+    clientContext?: AiClientContext,
   ): Promise<AgentResponse | null> {
     const engineUrl = process.env.AI_ENGINE_URL || 'http://localhost:8000';
     const organizationId = user.organizationId;
@@ -221,7 +236,7 @@ export class AiAgentService {
       const effectivePlan = hasPersistentIntelligence(plan, user) ? 'pro' : plan;
       headers['x-plan'] = effectivePlan;
 
-      const snapshot = await this.getApplicationContext(user).catch((error) => {
+      const snapshot = await this.getApplicationContext(user, clientContext).catch((error) => {
         console.warn(
           'AI snapshot unavailable, engine will use its own fallback:',
           error instanceof Error ? error.message : error,
@@ -257,7 +272,7 @@ export class AiAgentService {
     }
   }
 
-  async getApplicationContext(user: AiContextUser) {
+  async getApplicationContext(user: AiContextUser, clientContext?: AiClientContext) {
     const organizationId = user.organizationId;
     const plan = await this.resolveOrgPlan(organizationId);
     const filaments = await this.filamentService.findAll(organizationId);
@@ -267,9 +282,12 @@ export class AiAgentService {
     );
     const projects = await this.projectsService.findAll(user);
 
+    const normalizedContext = this.normalizeClientContext(clientContext);
+
     return {
       organization_id: String(organizationId),
       user_id: user.userId || user.sub ? String(user.userId || user.sub) : null,
+      active_context: normalizedContext,
       settings: {
         organization_id: String(organizationId),
         plan,
@@ -297,6 +315,18 @@ export class AiAgentService {
           filament.lowStockThresholdType || 'PERCENTAGE',
         price: filament.price ?? null,
         vendor: filament.vendor ?? null,
+        nozzle_temp_min_c: filament.nozzleTempMin ?? null,
+        nozzle_temp_max_c: filament.nozzleTempMax ?? null,
+        bed_temp_min_c: filament.bedTempMin ?? filament.bedTemp ?? null,
+        bed_temp_max_c: filament.bedTempMax ?? null,
+        print_speed_min_mm_s: filament.printSpeedMin ?? null,
+        print_speed_max_mm_s: filament.printSpeedMax ?? null,
+        max_volumetric_speed_mm3_s:
+          filament.maxVolumetricSpeedMm3S ?? null,
+        flow_ratio: filament.flowRatio ?? null,
+        k_factor: filament.kFactor ?? null,
+        density_g_cm3: filament.densityGcm3 ?? null,
+        diameter_mm: filament.diameterMm ?? null,
       })),
       consumptions: (history?.logs || []).map((log: any) => ({
         id: String(log.id),
@@ -464,6 +494,23 @@ export class AiAgentService {
       q.includes('bug')
     )
       return 'feedback';
+    if (
+      q.includes('calibration') ||
+      q.includes('calibrer') ||
+      q.includes('calibre') ||
+      q.includes('debit volumetrique') ||
+      q.includes('débit volumétrique') ||
+      q.includes('volumetric') ||
+      q.includes('flow tower') ||
+      q.includes('tour de temperature') ||
+      q.includes('temperature tower') ||
+      q.includes('sur extrusion') ||
+      q.includes('sous extrusion') ||
+      q.includes('k-factor') ||
+      q.includes('pressure advance') ||
+      q.includes('retraction')
+    )
+      return 'calibration';
     if (
       q.includes('finance') ||
       q.includes('coût') ||
@@ -879,6 +926,146 @@ export class AiAgentService {
     }
 
     return { intent: 'feasible_projects', answer, data: active };
+  }
+
+  private handleCalibration(question: string): AgentResponse {
+    const flow = this.extractVolumetricFlowCalibration(question);
+    if (!flow) {
+      return {
+        intent: 'calibration',
+        answer:
+          'Je peux aider sur les calibrations filament. Pour le débit volumétrique max, donnez par exemple: départ 5, max 20, pas 0.5, hauteur propre 22 mm.',
+        data: {
+          supportedCalibrations: [
+            'max_volumetric_speed',
+            'temperature_tower',
+            'flow_rate',
+            'pressure_advance',
+            'retraction',
+            'over_under_extrusion',
+          ],
+        },
+      };
+    }
+
+    const { start, maximum, step, cleanHeight, safetyPercent } = flow;
+    const observed = Math.min(start + cleanHeight * step, maximum);
+    const recommended = observed * (safetyPercent / 100);
+    const towerHeight = (maximum - start) / step;
+
+    return {
+      intent: 'calibration',
+      answer:
+        `Calcul du débit volumétrique max:\n` +
+        `- départ: ${start} mm3/s\n` +
+        `- max: ${maximum} mm3/s\n` +
+        `- pas: ${step} mm3/s par mm\n` +
+        `- hauteur propre: ${cleanHeight} mm\n\n` +
+        `Débit observé: **${observed.toFixed(2)} mm3/s**.\n` +
+        `Valeur recommandée avec marge ${safetyPercent}%: **${recommended.toFixed(2)} mm3/s**.\n\n` +
+        `Formule: départ + hauteur propre x pas. Hauteur utile de la tour: ${towerHeight.toFixed(2)} mm.`,
+      data: {
+        calibrationType: 'max_volumetric_speed',
+        observedMm3S: Number(observed.toFixed(2)),
+        recommendedMm3S: Number(recommended.toFixed(2)),
+        towerHeightMm: Number(towerHeight.toFixed(2)),
+        safetyPercent,
+      },
+    };
+  }
+
+  private normalizeClientContext(context?: AiClientContext) {
+    if (!context || typeof context !== 'object') {
+      return null;
+    }
+    const filamentIds = Array.isArray(context.filamentIds)
+      ? context.filamentIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+          .map((id) => String(id))
+      : [];
+    const projectId = context.projectId === null || context.projectId === undefined || context.projectId === ''
+      ? null
+      : Number(context.projectId);
+    const mode = ['auto', 'calibration', 'stock', 'project'].includes(String(context.mode))
+      ? String(context.mode)
+      : 'auto';
+    const source = ['passive', 'active', 'mixed'].includes(String(context.source))
+      ? String(context.source)
+      : 'passive';
+    return {
+      mode,
+      source,
+      filament_ids: filamentIds,
+      project_id: projectId !== null && Number.isFinite(projectId) && projectId > 0 ? String(projectId) : null,
+      page: {
+        path: typeof context.page?.path === 'string' ? context.page.path.slice(0, 160) : null,
+        kind: typeof context.page?.kind === 'string' ? context.page.kind.slice(0, 60) : null,
+      },
+    };
+  }
+
+  private extractVolumetricFlowCalibration(question: string):
+    | {
+        start: number;
+        maximum: number;
+        step: number;
+        cleanHeight: number;
+        safetyPercent: number;
+      }
+    | null {
+    const text = question.toLowerCase().replace(',', '.');
+    if (
+      !text.includes('debit') &&
+      !text.includes('débit') &&
+      !text.includes('volumetric') &&
+      !text.includes('volumetrique') &&
+      !text.includes('volumétrique')
+    ) {
+      return null;
+    }
+
+    const findValue = (labels: string[]) => {
+      const joined = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+      const match = text.match(new RegExp(`(?:${joined})\\s*(?:=|:|a|de)?\\s*(-?\\d+(?:\\.\\d+)?)`, 'i'));
+      return match ? Number(match[1]) : null;
+    };
+
+    let start = findValue(['depart', 'départ', 'start', 'valeur de depart', 'valeur de départ']);
+    let maximum = findValue(['max', 'maximum', 'valeur max', 'valeur maximum']);
+    let step = findValue(['pas', 'step', 'increment', 'incrément']);
+    let cleanHeight = findValue(['hauteur propre', 'hauteur', 'mesure', 'mesurée', 'clean height']);
+    const safetyPercent = findValue(['marge', 'securite', 'sécurité', 'safety']) ?? 95;
+
+    if (start === null || maximum === null || step === null || cleanHeight === null) {
+      const numbers = [...text.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+      if (numbers.length >= 4) {
+        [start, maximum, step, cleanHeight] = numbers;
+      }
+    }
+
+    if (
+      start === null ||
+      maximum === null ||
+      step === null ||
+      cleanHeight === null ||
+      !Number.isFinite(start) ||
+      !Number.isFinite(maximum) ||
+      !Number.isFinite(step) ||
+      !Number.isFinite(cleanHeight) ||
+      step <= 0 ||
+      maximum <= start
+    ) {
+      return null;
+    }
+
+    return {
+      start,
+      maximum,
+      step,
+      cleanHeight,
+      safetyPercent: Math.max(0, Math.min(safetyPercent, 100)),
+    };
   }
 
   private async handleFeedback(

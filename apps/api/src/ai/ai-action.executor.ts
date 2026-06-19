@@ -19,6 +19,8 @@ export class AiActionExecutor {
         return this.createConsumption(action.payload, user);
       case AiActionType.UPDATE_STOCK_THRESHOLD:
         return this.updateThreshold(action.payload, user);
+      case AiActionType.UPDATE_FILAMENT_CALIBRATION:
+        return this.updateFilamentCalibration(action.payload, user);
       case AiActionType.CREATE_ALERT:
       case AiActionType.PREPARE_NOTIFICATION:
         return this.createAlert(action.payload, user);
@@ -82,6 +84,47 @@ export class AiActionExecutor {
     await this.filamentService.findOne(filamentId, user.organizationId);
     await this.filamentService.update(filamentId, { lowStockThreshold: threshold }, user.organizationId, user);
     return { executed: true, filament_id: filamentId, threshold };
+  }
+
+  private async updateFilamentCalibration(payload: any, user: ExecUser): Promise<Record<string, any>> {
+    const filamentId = Number(payload?.filament_id);
+    if (!Number.isFinite(filamentId) || filamentId <= 0) {
+      throw new BadRequestException(
+        `filament_id invalide (reçu: ${JSON.stringify(payload?.filament_id)})`,
+      );
+    }
+
+    const allowed: Record<string, string> = {
+      max_volumetric_speed_mm3_s: 'maxVolumetricSpeedMm3S',
+      flow_ratio: 'flowRatio',
+      k_factor: 'kFactor',
+      nozzle_temp_min_c: 'nozzleTempMin',
+      nozzle_temp_max_c: 'nozzleTempMax',
+      print_speed_min_mm_s: 'printSpeedMin',
+      print_speed_max_mm_s: 'printSpeedMax',
+      retraction_distance_mm: 'retractionDistanceMm',
+      retraction_speed_mm_s: 'retractionSpeedMmS',
+      retraction_z_hop_mm: 'retractionZHopMm',
+    };
+    const update: Record<string, number> = {};
+    for (const [payloadKey, entityKey] of Object.entries(allowed)) {
+      if (payload?.[payloadKey] === undefined || payload?.[payloadKey] === null || payload?.[payloadKey] === '') {
+        continue;
+      }
+      const value = Number(payload[payloadKey]);
+      if (!Number.isFinite(value)) {
+        throw new BadRequestException(`${payloadKey} invalide`);
+      }
+      update[entityKey] = value;
+    }
+
+    if (Object.keys(update).length === 0) {
+      throw new BadRequestException('Aucune valeur de calibration a appliquer');
+    }
+
+    await this.filamentService.findOne(filamentId, user.organizationId);
+    await this.filamentService.update(filamentId, update, user.organizationId, user);
+    return { executed: true, filament_id: filamentId, updated_fields: update };
   }
 
   private async createAlert(payload: any, user: ExecUser): Promise<Record<string, any>> {
