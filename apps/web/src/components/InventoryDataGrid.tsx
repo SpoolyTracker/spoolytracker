@@ -3,7 +3,7 @@ import { DataGrid } from '@mui/x-data-grid';
 import type { GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { frFR } from '@mui/x-data-grid/locales';
 import { Box, Typography, Chip, IconButton, Tooltip, Button, Checkbox } from '@mui/material';
-import { Edit2, Trash2, Copy, PencilRuler, ChevronRight, ChevronDown, Lock, Printer as PrinterIcon, FileJson, Star } from 'lucide-react';
+import { Edit2, Trash2, Copy, PencilRuler, ChevronRight, ChevronDown, Lock, Printer as PrinterIcon, FileJson, Star, Calculator } from 'lucide-react';
 import ColorIndicator from './ColorIndicator';
 import { getFilamentTitle, getFilamentChips, groupFilaments, checkIsLowStock } from '../utils/filament-utils';
 import type { Filament } from '../api';
@@ -26,6 +26,7 @@ interface InventoryDataGridProps {
     onExportProfile?: (filament: Filament) => void;
     onToggleFavorite?: (filament: Filament) => void;
     onToggleGroupFavorite?: (filaments: Filament[]) => void;
+    onOpenCalculators?: (filament: Filament) => void;
 }
 
 interface GroupRow {
@@ -76,6 +77,7 @@ export default function InventoryDataGrid({
     onExportProfile,
     onToggleFavorite,
     onToggleGroupFavorite,
+    onOpenCalculators,
 }: InventoryDataGridProps) {
     const { t } = useTranslation();
     const { user } = useAuth();
@@ -391,6 +393,15 @@ export default function InventoryDataGrid({
                                 </IconButton>
                             </span>
                         </Tooltip>
+                        {onOpenCalculators && (
+                            <Tooltip title={t('inventory.filamentModal.calibrationCalculators', 'Calculateurs de calibration')}>
+                                <span>
+                                    <IconButton size="small" onClick={() => onOpenCalculators(f)} sx={{ width: 34, height: 34, color: 'text.secondary' }}>
+                                        <Calculator size={16} />
+                                    </IconButton>
+                                </span>
+                            </Tooltip>
+                        )}
                         {onPrintLabel && (
                             <Tooltip title={t('common.printLabel', 'Print label')}>
                                 <span>

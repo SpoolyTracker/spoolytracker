@@ -94,6 +94,43 @@ export class AiActionExecutor {
       );
     }
 
+    // VFA: add/replace a conditional temperature rule (max speed at a given temperature)
+    // and raise the global print speed max. Mirrors applyVfaResult on the web side.
+    if (payload?.vfa_max_speed_mm_s !== undefined && payload?.vfa_max_speed_mm_s !== null
+      && payload?.vfa_temperature_c !== undefined && payload?.vfa_temperature_c !== null) {
+      const vmax = Number(payload.vfa_max_speed_mm_s);
+      const temp = Number(payload.vfa_temperature_c);
+      if (!Number.isFinite(vmax) || !Number.isFinite(temp)) {
+        throw new BadRequestException('vfa_max_speed_mm_s / vfa_temperature_c invalides');
+      }
+      const filament = await this.filamentService.findOne(filamentId, user.organizationId);
+      let rules: any = (filament as any).conditionalTemperatureRules;
+      if (typeof rules === 'string') {
+        try { rules = JSON.parse(rules); } catch { rules = []; }
+      }
+      rules = Array.isArray(rules) ? rules.map((r: any) => ({ ...r })) : [];
+      const idx = rules.findIndex(
+        (r: any) => r.nozzleTempMin === temp && r.nozzleTempMax === temp,
+      );
+      if (idx >= 0) {
+        rules[idx] = { ...rules[idx], speedMaxMmS: vmax };
+      } else {
+        rules.push({ speedMinMmS: null, speedMaxMmS: vmax, nozzleTempMin: temp, nozzleTempMax: temp });
+      }
+      const printSpeedMax = Math.max(Number(filament.printSpeedMax) || 0, vmax);
+      await this.filamentService.update(
+        filamentId,
+        { conditionalTemperatureRules: rules, printSpeedMax },
+        user.organizationId,
+        user,
+      );
+      return {
+        executed: true,
+        filament_id: filamentId,
+        updated_fields: { conditionalTemperatureRules: rules, printSpeedMax },
+      };
+    }
+
     const allowed: Record<string, string> = {
       max_volumetric_speed_mm3_s: 'maxVolumetricSpeedMm3S',
       flow_ratio: 'flowRatio',

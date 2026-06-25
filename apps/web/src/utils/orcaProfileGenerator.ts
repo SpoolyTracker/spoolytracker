@@ -1,6 +1,47 @@
 import type { Filament } from '../api';
 
-export const generateOrcaProfile = (filament: Filament) => {
+// OrcaSlicer / Bambu Studio printer preset names follow "<model> <nozzle> nozzle".
+// Grouped by brand for the export dialog. Not exhaustive: the dialog also offers a
+// free-text "custom" option so any printer (any slicer) can be targeted exactly.
+export const PRINTER_PRESET_GROUPS: { group: string; models: string[] }[] = [
+    {
+        group: 'Bambu Lab',
+        models: [
+            'Bambu Lab X1 Carbon',
+            'Bambu Lab X1',
+            'Bambu Lab X1E',
+            'Bambu Lab P1S',
+            'Bambu Lab P1P',
+            'Bambu Lab A1',
+            'Bambu Lab A1 mini',
+            'Bambu Lab H2D',
+        ],
+    },
+    {
+        group: 'Prusa',
+        models: ['Prusa MK4S', 'Prusa MK4', 'Prusa MK3.5', 'Prusa MINI', 'Prusa XL', 'Prusa CORE One'],
+    },
+    {
+        group: 'Creality',
+        models: ['Creality Ender-3 V3', 'Creality Ender-3 V3 KE', 'Creality K1', 'Creality K1 Max', 'Creality K1C', 'Creality CR-10'],
+    },
+    {
+        group: 'Voron',
+        models: ['Voron 2.4 250', 'Voron 2.4 300', 'Voron Trident 250', 'Voron Trident 300'],
+    },
+    {
+        group: 'Autres',
+        models: ['Sovol SV06', 'Sovol SV08', 'Anycubic Kobra 2', 'Elegoo Neptune 4', 'Qidi X-Plus 3'],
+    },
+];
+export const NOZZLE_SIZES = ['0.2', '0.4', '0.6', '0.8'];
+export const composePrinterPreset = (model: string, nozzle: string) => `${model} ${nozzle} nozzle`;
+
+// Default target printer. User filament presets are printer-specific: the preset name
+// ends with "@<printer>" and compatible_printers lists that one printer.
+export const DEFAULT_TARGET_PRINTER = composePrinterPreset('Bambu Lab P1S', '0.4');
+
+export const generateOrcaProfile = (filament: Filament, targetPrinter: string = DEFAULT_TARGET_PRINTER) => {
     // Determine basics
     const materialType = filament.material?.name || 'PLA';
     const vendor = filament.brand?.name || filament.vendor || 'Generic';
@@ -20,9 +61,20 @@ export const generateOrcaProfile = (filament: Filament) => {
     const roundedArray = (value: unknown, fallback = 0) => [String(Math.round(hasNumber(value) ? value : fallback))];
 
     const nozzleTempFirst = filament.nozzleTempMax || defaultNozzle;
-    const nozzleTempOther = filament.nozzleTempMin
-        ? (filament.nozzleTempMin + (filament.nozzleTempMax || filament.nozzleTempMin)) / 2
-        : nozzleTempFirst;
+    // Print nozzle temperature:
+    // - If conditional temperature-by-speed rules exist, use the highest rule temperature
+    //   (each rule's upper bound, falling back to its lower bound). Example: a rule
+    //   210-220 C exports 220 C.
+    // - Otherwise, the configured max minus a 20 C margin (the absolute max is the ceiling,
+    //   not the everyday print temp). If no max is set at all, fall back to the default.
+    const conditionalRuleTemps = (filament.conditionalTemperatureRules || [])
+        .map((rule) => (hasNumber(rule.nozzleTempMax) ? rule.nozzleTempMax : hasNumber(rule.nozzleTempMin) ? rule.nozzleTempMin : null))
+        .filter((value): value is number => value != null);
+    const printNozzleTemp = conditionalRuleTemps.length > 0
+        ? Math.max(...conditionalRuleTemps)
+        : hasNumber(filament.nozzleTempMax)
+            ? filament.nozzleTempMax - 20
+            : defaultNozzle;
 
     const bedTempFirst = filament.bedTempMax || defaultBed;
     const bedTempOther = filament.bedTempMin || filament.bedTemp || defaultBed;
@@ -61,10 +113,19 @@ export const generateOrcaProfile = (filament: Filament) => {
             : '',
     ].filter(Boolean).join('\n\n');
 
-    const profileName = `${vendor} ${materialType}${colorName ? ` ${colorName}` : ''}`.trim();
+    const baseName = `${vendor} ${materialType}${colorName ? ` ${colorName}` : ''}`.trim();
+    // Bambu Studio user filament presets are named "<filament> @<printer>" and bound to
+    // exactly that printer via compatible_printers. This is what registers the profile as
+    // a selectable custom filament (visible in the AMS material list), as opposed to a bare
+    // printer-scoped override. Matches the structure of working user-exported presets.
+    const profileName = `${baseName} @${targetPrinter}`;
     const isPetg = materialType.toUpperCase().includes('PETG');
 
     return {
+        // --- Bambu Studio user filament preset metadata ---
+        // No "type" / "instantiation" / "setting_id": those mark SYSTEM/bundle profiles.
+        // User filament presets omit them, otherwise Bambu Studio does not register the
+        // profile as a custom filament (it would not appear in the AMS material list).
         "activate_air_filtration": ["0"],
         "additional_cooling_fan_speed": ["0"],
         "additional_fan_full_speed_layer": ["0"],
@@ -72,7 +133,8 @@ export const generateOrcaProfile = (filament: Filament) => {
         "circle_compensation_speed": ["200"],
         "close_additional_fan_first_x_layers": ["3"],
         "close_fan_the_first_x_layers": ["3"],
-        "compatible_printers": ["Bambu Lab P1S 0.4 nozzle"],
+        // Single printer matching the "@<printer>" suffix in name/filament_settings_id.
+        "compatible_printers": [targetPrinter],
         "compatible_printers_condition": "",
         "compatible_prints": [],
         "compatible_prints_condition": "",
@@ -188,10 +250,10 @@ export const generateOrcaProfile = (filament: Filament) => {
         "long_retractions_when_ec": ["0"],
         "name": profileName, // String
         "no_slow_down_for_cooling_on_outwalls": ["0"],
-        "nozzle_temperature": [String(Math.round(nozzleTempOther))],
-        "nozzle_temperature_initial_layer": [String(Math.round(nozzleTempFirst))],
-        "nozzle_temperature_range_high": [String(Math.round(nozzleTempFirst + 20))],
-        "nozzle_temperature_range_low": [String(Math.round(filament.nozzleTempMin || nozzleTempFirst - 20))],
+        "nozzle_temperature": [String(Math.round(printNozzleTemp))],
+        "nozzle_temperature_initial_layer": [String(Math.round(printNozzleTemp))],
+        "nozzle_temperature_range_high": [String(Math.round(filament.nozzleTempMax || (nozzleTempFirst + 20)))],
+        "nozzle_temperature_range_low": [String(Math.round(filament.nozzleTempMin || (nozzleTempFirst - 20)))],
         "overhang_fan_speed": ["90"],
         "overhang_fan_threshold": ["10%"],
         "overhang_threshold_participating_cooling": ["95%"],

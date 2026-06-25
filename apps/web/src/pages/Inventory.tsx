@@ -26,6 +26,13 @@ import {
     CircularProgress,
     Checkbox,
     Tooltip,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    FormControl,
+    InputLabel,
+    Autocomplete,
     useTheme
 } from '@mui/material';
 import {
@@ -55,10 +62,12 @@ import {
     ChevronRight,
     Archive,
     Star,
-    MoreHorizontal
+    MoreHorizontal,
+    Calculator
 } from 'lucide-react';
 import InventoryDataGrid from '../components/InventoryDataGrid';
-import { generateOrcaProfile } from '../utils/orcaProfileGenerator';
+import CalibrationCalculatorsModal from '../components/CalibrationCalculatorsModal';
+import { generateOrcaProfile, PRINTER_PRESET_GROUPS, NOZZLE_SIZES, composePrinterPreset } from '../utils/orcaProfileGenerator';
 import LabelGenerator from '../components/LabelGenerator';
 
 import { api } from '../api';
@@ -159,6 +168,7 @@ const InventoryRow = ({
     handlePrintLabel,
     handleExportProfile,
     handleToggleFavorite,
+    onOpenCalculators,
     organization,
     isChild = false
 }: {
@@ -178,6 +188,7 @@ const InventoryRow = ({
     handlePrintLabel: (f: Filament) => void;
     handleExportProfile: (f: Filament) => void;
     handleToggleFavorite: (f: Filament) => void;
+    onOpenCalculators: (f: Filament) => void;
     organization: any;
     isChild?: boolean;
 }) => {
@@ -380,6 +391,11 @@ const InventoryRow = ({
                                 </IconButton>
                             </span>
                         </Tooltip>
+                        <Tooltip title={t('inventory.filamentModal.calibrationCalculators', 'Calculateurs de calibration')}>
+                            <IconButton size="small" onClick={() => onOpenCalculators(f)} sx={inlineSecondaryActionSx}>
+                                <Calculator size={18} />
+                            </IconButton>
+                        </Tooltip>
                         <Tooltip title={t('common.exportProfile', 'Exporter le profil')}>
                             <IconButton size="small" onClick={() => handleExportProfile(f)} sx={inlineSecondaryActionSx}>
                                 <FileJson size={18} />
@@ -424,6 +440,10 @@ const InventoryRow = ({
                             <MenuItem disabled={!canClone} onClick={() => { handleClone(f.id); closeActionsMenu(); }}>
                                 <Copy size={17} style={{ marginRight: 10 }} />
                                 {t('common.clone')}
+                            </MenuItem>
+                            <MenuItem onClick={() => { onOpenCalculators(f); closeActionsMenu(); }}>
+                                <Calculator size={17} style={{ marginRight: 10 }} />
+                                {t('inventory.filamentModal.calibrationCalculators', 'Calculateurs de calibration')}
                             </MenuItem>
                             <MenuItem onClick={() => { handleExportProfile(f); closeActionsMenu(); }}>
                                 <FileJson size={17} style={{ marginRight: 10 }} />
@@ -704,6 +724,17 @@ export default function InventoryPage() {
         }
     };
 
+    const [calcFilament, setCalcFilament] = useState<Filament | null>(null);
+    const [exportFilament, setExportFilament] = useState<Filament | null>(null);
+    const [exportPrinterModel, setExportPrinterModel] = useState<string>(() => localStorage.getItem('exportPrinterModel') || 'Bambu Lab P1S');
+    const [exportNozzle, setExportNozzle] = useState<string>(() => localStorage.getItem('exportNozzle') || '0.4');
+    const printerOptions = useMemo(() => PRINTER_PRESET_GROUPS.flatMap((g) => g.models), []);
+    const printerModelToGroup = useMemo(() => {
+        const map: Record<string, string> = {};
+        PRINTER_PRESET_GROUPS.forEach((g) => g.models.forEach((m) => { map[m] = g.group; }));
+        return map;
+    }, []);
+
     const handleToggleFavorite = async (spool: Filament) => {
         const favorite = !spool.favorite;
         setFilaments(prev => prev.map(item => item.id === spool.id ? { ...item, favorite } : item));
@@ -842,9 +873,14 @@ export default function InventoryPage() {
         });
     }, [filaments, filterState, organization, showDepleted]);
 
+    // Opens the printer-selection dialog; the actual download happens on confirm.
     const handleExportProfile = (filament: Filament) => {
+        setExportFilament(filament);
+    };
+
+    const doExportProfile = (filament: Filament, targetPrinter: string) => {
         try {
-            const profile = generateOrcaProfile(filament);
+            const profile = generateOrcaProfile(filament, targetPrinter);
             const jsonString = JSON.stringify(profile, null, 4);
             const blob = new Blob([jsonString], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -861,6 +897,24 @@ export default function InventoryPage() {
             console.error('Failed to export profile', error);
             alert('Failed to generate export profile');
         }
+    };
+
+    // If the user typed a full preset name (ending in "nozzle"), use it verbatim;
+    // otherwise compose the chosen/typed model with the nozzle dropdown.
+    const exportPrinterTrimmed = exportPrinterModel.trim();
+    const exportNameHasNozzle = /nozzle\s*$/i.test(exportPrinterTrimmed);
+    const exportTargetPrinter = !exportPrinterTrimmed
+        ? ''
+        : exportNameHasNozzle
+            ? exportPrinterTrimmed
+            : composePrinterPreset(exportPrinterTrimmed, exportNozzle);
+
+    const confirmExportProfile = () => {
+        if (!exportFilament || !exportTargetPrinter) return;
+        localStorage.setItem('exportPrinterModel', exportPrinterModel);
+        localStorage.setItem('exportNozzle', exportNozzle);
+        doExportProfile(exportFilament, exportTargetPrinter);
+        setExportFilament(null);
     };
 
     const handlePrintLabel = (filament: Filament | Filament[]) => {
@@ -1451,6 +1505,7 @@ export default function InventoryPage() {
                                                             handlePrintLabel={(f) => handlePrintLabel(f)}
                                                             handleExportProfile={(f) => handleExportProfile(f)}
                                                             handleToggleFavorite={handleToggleFavorite}
+                                                            onOpenCalculators={(f) => setCalcFilament(f)}
                                                             organization={organization}
                                                         />
                                                     ))}
@@ -1599,6 +1654,7 @@ export default function InventoryPage() {
                                                                     handlePrintLabel={(f) => handlePrintLabel(f)}
                                                                     handleExportProfile={(f) => handleExportProfile(f)}
                                                                     handleToggleFavorite={handleToggleFavorite}
+                                                                    onOpenCalculators={(f) => setCalcFilament(f)}
                                                                     organization={organization}
                                                                     isChild={true}
                                                                 />
@@ -1878,6 +1934,7 @@ export default function InventoryPage() {
                     onExportProfile={handleExportProfile}
                     onToggleFavorite={handleToggleFavorite}
                     onToggleGroupFavorite={handleToggleGroupFavorite}
+                    onOpenCalculators={(f) => setCalcFilament(f)}
                 />
             )}
 
@@ -1975,6 +2032,59 @@ export default function InventoryPage() {
                     />
                 )
             }
+
+            <CalibrationCalculatorsModal
+                open={!!calcFilament}
+                filament={calcFilament}
+                onClose={() => setCalcFilament(null)}
+            />
+
+            <Dialog open={!!exportFilament} onClose={() => setExportFilament(null)} maxWidth="xs" fullWidth>
+                <DialogTitle>{t('inventory.exportProfileDialog.title', 'Exporter le profil filament')}</DialogTitle>
+                <DialogContent>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        {t('inventory.exportProfileDialog.subtitle', 'Choisissez l\'imprimante cible : le profil Bambu Studio est spécifique à une imprimante.')}
+                    </Typography>
+                    <Autocomplete
+                        freeSolo
+                        fullWidth
+                        options={printerOptions}
+                        groupBy={(option) => printerModelToGroup[option] || t('inventory.exportProfileDialog.otherGroup', 'Autre')}
+                        inputValue={exportPrinterModel}
+                        onInputChange={(_, value) => setExportPrinterModel(value)}
+                        sx={{ mb: 2 }}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label={t('inventory.exportProfileDialog.printer', 'Imprimante')}
+                                placeholder={t('inventory.exportProfileDialog.printerPlaceholder', 'Rechercher ou saisir le nom exact…')}
+                            />
+                        )}
+                    />
+                    <FormControl fullWidth disabled={exportNameHasNozzle}>
+                        <InputLabel id="export-nozzle-label">{t('inventory.exportProfileDialog.nozzle', 'Buse')}</InputLabel>
+                        <Select
+                            labelId="export-nozzle-label"
+                            label={t('inventory.exportProfileDialog.nozzle', 'Buse')}
+                            value={exportNozzle}
+                            onChange={(e) => setExportNozzle(e.target.value)}
+                        >
+                            {NOZZLE_SIZES.map((size) => (
+                                <MenuItem key={size} value={size}>{size} mm</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                        {exportNameHasNozzle
+                            ? t('inventory.exportProfileDialog.fullNameHint', 'Nom complet détecté (… nozzle) : utilisé tel quel.')
+                            : t('inventory.exportProfileDialog.targetHint', { target: exportTargetPrinter, defaultValue: 'Cible : {{target}}' })}
+                    </Typography>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setExportFilament(null)}>{t('common.cancel', 'Annuler')}</Button>
+                    <Button variant="contained" disabled={!exportTargetPrinter} onClick={confirmExportProfile}>{t('common.export', 'Exporter')}</Button>
+                </DialogActions>
+            </Dialog>
 
             <InventoryFilters
                 open={isFilterOpen}
