@@ -166,13 +166,23 @@ class FreeAssistantAgent(BaseAgent):
                 "pas ",
                 "temperature tower",
                 "tour de temperature",
+                "tour de température",
                 "sur extrusion",
                 "sous extrusion",
                 "under extrusion",
                 "over extrusion",
                 "k-factor",
+                "kfactor",
                 "pressure advance",
                 "retraction",
+                "rétraction",
+                "flow ratio",
+                "flow rate",
+                "vfa",
+                "encoche",
+                "largeur cible",
+                "largeur mesuree",
+                "largeur mesurée",
             ],
         ):
             return IntentDetection(intent=Intent.CALIBRATION, confidence=0.9)
@@ -483,6 +493,19 @@ class FreeAssistantAgent(BaseAgent):
         )
 
     def _answer_calibration(self, prompt: str, context: dict) -> AgentResult:
+        text = prompt.lower().replace(",", ".")
+        kind = self._detect_calibration_kind(text)
+        if kind == "flow_ratio":
+            return self._answer_flow_ratio_calibration(prompt, context)
+        if kind == "pressure_advance":
+            return self._answer_pressure_advance_calibration(prompt, context)
+        if kind == "temp_tower":
+            return self._answer_temp_tower_calibration(prompt, context)
+        if kind == "retraction":
+            return self._answer_retraction_calibration(prompt, context)
+        if kind == "vfa":
+            return self._answer_vfa_calibration(prompt, context)
+
         flow = self._extract_volumetric_flow_calibration(prompt)
         if flow:
             start, maximum, step, clean_height, safety_percent = flow
@@ -588,18 +611,23 @@ class FreeAssistantAgent(BaseAgent):
         return AgentResult(
             intent=Intent.CALIBRATION,
             answer=(
-                "Je peux t'aider pour les calibrations filament. Pour le debit volumetrique max, donne-moi "
-                "par exemple: depart 5, max 20, pas 0.5, hauteur propre 22 mm. "
-                "Je calculerai la valeur observee et une valeur recommandee avec marge."
+                "Je peux t'aider pour plusieurs calibrations filament. Decris ton test, par exemple:\n"
+                "- Debit volumetrique: depart 5, max 20, pas 0.5, hauteur propre 22 mm\n"
+                "- Flow ratio: largeur cible 0.45, mesuree 0.47\n"
+                "- Pressure advance: depart 0, pas 0.002, meilleure ligne 35\n"
+                "- Tour de temperature: depart 230, pas 5, meilleure section 3\n"
+                "- Retraction: depart 0.2, pas 0.1, meilleure section 4\n"
+                "- VFA: depart 160, pas 20, encoche 11, temperature 220\n\n"
+                "Avec une seule bobine selectionnee, je propose d'appliquer la valeur (apres confirmation)."
             ),
             data={
                 "supported_calibrations": [
                     "max_volumetric_speed",
-                    "temperature_tower",
-                    "flow_rate",
+                    "flow_ratio",
                     "pressure_advance",
+                    "temperature_tower",
                     "retraction",
-                    "over_under_extrusion",
+                    "vfa_max_speed",
                 ],
             },
         )
@@ -634,6 +662,343 @@ class FreeAssistantAgent(BaseAgent):
             intent=Intent.GENERAL_QUESTION,
             answer=f"Contexte actif pris en compte: {'; '.join(parts)}.{usage}",
             data={"active_context": context.get("active_context")},
+        )
+
+    def _detect_calibration_kind(self, text: str) -> str | None:
+        if self._has_any(text, ["vfa", "encoche"]):
+            return "vfa"
+        if self._has_any(text, ["pressure advance", "pressure_advance", "k-factor", "kfactor", "k factor"]):
+            return "pressure_advance"
+        if self._has_any(text, ["tour de temperature", "tour de température", "temperature tower", "temp tower", "tour temp"]):
+            return "temp_tower"
+        if self._has_any(text, ["retraction", "rétraction", "retract"]):
+            return "retraction"
+        if self._has_any(text, ["flow ratio", "flow rate", "ratio de debit", "ratio de débit", "largeur cible", "largeur mesuree", "largeur mesurée"]):
+            return "flow_ratio"
+        return None
+
+    def _find_labeled_value(self, text: str, labels: list[str]) -> float | None:
+        joined = "|".join(re.escape(label) for label in labels)
+        match = re.search(
+            rf"(?:{joined})\s*(?:=|:|a|de)?\s*(-?\d+(?:\.\d+)?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return float(match.group(1)) if match else None
+
+    def _calibration_numbers(self, text: str) -> list[float]:
+        return [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", text)]
+
+    def _resolve_calibration_target(
+        self, prompt: str, context: dict
+    ) -> tuple[StockItem | None, list[StockItem]]:
+        active_items = self._active_stock_items(context)
+        candidates = self._find_consumption_candidates(prompt, active_items) if active_items else []
+        if not candidates:
+            candidates = active_items or self._find_consumption_candidates(prompt, self._stock_items(context) or [])
+        item = candidates[0] if len(candidates) == 1 else None
+        return item, candidates
+
+    def _calibration_target_note(
+        self, item: StockItem | None, candidates: list[StockItem], context: dict
+    ) -> str:
+        if item:
+            return (
+                f"\n\nJ'ai identifie la bobine **{self._display_stock_item(item)}**. "
+                "Je peux proposer l'application de cette valeur apres validation."
+            )
+        if len(candidates) > 1:
+            return (
+                "\n\nPlusieurs bobines sont dans le contexte actif. Garde une seule bobine "
+                "selectionnee, ou precise la marque, la matiere ou la couleur."
+            )
+        if self._stock_items(context):
+            return (
+                "\n\nJe n'ai pas identifie la bobine cible. Ajoute son nom, sa marque, "
+                "sa matiere ou sa couleur pour que je propose la modification automatiquement."
+            )
+        return ""
+
+    def _calibration_action(
+        self, item: StockItem, label: str, extra_payload: dict
+    ) -> list[dict]:
+        payload = {"filament_id": item.id, **extra_payload}
+        return [
+            ProposedAction(
+                type="update_filament_calibration",
+                label=label,
+                payload=payload,
+            ).model_dump()
+        ]
+
+    def _answer_flow_ratio_calibration(self, prompt: str, context: dict) -> AgentResult:
+        text = prompt.lower().replace(",", ".")
+        expected = self._find_labeled_value(text, ["largeur cible", "cible", "largeur attendue", "attendu", "expected"])
+        measured = self._find_labeled_value(text, ["largeur mesuree", "largeur mesurée", "mesuree", "mesurée", "mesure", "measured"])
+        if expected is None or measured is None:
+            nums = self._calibration_numbers(text)
+            if len(nums) >= 2:
+                expected, measured = nums[0], nums[1]
+        if expected is None:
+            expected = 0.45
+        item, candidates = self._resolve_calibration_target(prompt, context)
+        current = item.flow_ratio if item and item.flow_ratio else 1.0
+        if measured is None or measured <= 0 or expected <= 0:
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    "Pour le flow ratio, donne-moi la largeur cible (defaut 0.45 mm) et la largeur mesuree. "
+                    "Ex: flow ratio, largeur cible 0.45, mesuree 0.47."
+                ),
+                data={"calibration_type": "flow_ratio"},
+            )
+        result = round(current * expected / measured, 3)
+        note = self._calibration_target_note(item, candidates, context)
+        proposed_actions = (
+            self._calibration_action(
+                item,
+                f"Appliquer flow ratio {result} sur {self._display_stock_item(item)}",
+                {"flow_ratio": result, "calibration_type": "flow_ratio"},
+            )
+            if item
+            else []
+        )
+        return AgentResult(
+            intent=Intent.CALIBRATION,
+            answer=(
+                f"Flow ratio calcule: **{result}**.\n"
+                f"- flow ratio actuel: {current:g}\n"
+                f"- largeur cible: {expected:g} mm\n"
+                f"- largeur mesuree: {measured:g} mm\n\n"
+                "Formule: flow actuel x cible / mesuree."
+                f"{note}"
+            ),
+            requires_confirmation=bool(proposed_actions),
+            proposed_actions=proposed_actions,
+            data={
+                "calibration_type": "flow_ratio",
+                "flow_ratio": result,
+                "current_flow_ratio": current,
+                "expected_width_mm": expected,
+                "measured_width_mm": measured,
+            },
+        )
+
+    def _answer_pressure_advance_calibration(self, prompt: str, context: dict) -> AgentResult:
+        text = prompt.lower().replace(",", ".")
+        start = self._find_labeled_value(text, ["depart", "départ", "start"])
+        step = self._find_labeled_value(text, ["pas", "step", "increment"])
+        line = self._find_labeled_value(text, ["meilleure ligne", "ligne", "best line", "line"])
+        if start is None or step is None or line is None:
+            nums = self._calibration_numbers(text)
+            if len(nums) >= 3:
+                start, step, line = nums[0], nums[1], nums[2]
+        if start is None:
+            start = 0.0
+        if step is None or line is None or step <= 0 or line < 1:
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    "Pour le pressure advance, donne-moi depart, pas et la meilleure ligne. "
+                    "Ex: pressure advance depart 0, pas 0.002, meilleure ligne 35."
+                ),
+                data={"calibration_type": "pressure_advance"},
+            )
+        result = round(start + (line - 1) * step, 4)
+        item, candidates = self._resolve_calibration_target(prompt, context)
+        note = self._calibration_target_note(item, candidates, context)
+        proposed_actions = (
+            self._calibration_action(
+                item,
+                f"Appliquer K-factor {result} sur {self._display_stock_item(item)}",
+                {"k_factor": result, "calibration_type": "pressure_advance"},
+            )
+            if item
+            else []
+        )
+        return AgentResult(
+            intent=Intent.CALIBRATION,
+            answer=(
+                f"Pressure advance (K-factor) calcule: **{result}**.\n"
+                f"- depart: {start:g}\n- pas: {step:g}\n- meilleure ligne: {line:g}\n\n"
+                "Formule: depart + (ligne - 1) x pas."
+                f"{note}"
+            ),
+            requires_confirmation=bool(proposed_actions),
+            proposed_actions=proposed_actions,
+            data={
+                "calibration_type": "pressure_advance",
+                "k_factor": result,
+                "start": start,
+                "step": step,
+                "best_line": line,
+            },
+        )
+
+    def _answer_temp_tower_calibration(self, prompt: str, context: dict) -> AgentResult:
+        text = prompt.lower().replace(",", ".")
+        start = self._find_labeled_value(text, ["temp depart", "temperature depart", "température depart", "depart", "départ", "start"])
+        step = self._find_labeled_value(text, ["pas", "step", "increment"])
+        index = self._find_labeled_value(text, ["meilleure section", "section", "best section", "meilleure", "best"])
+        if start is None or step is None or index is None:
+            nums = self._calibration_numbers(text)
+            if len(nums) >= 3:
+                start, step, index = nums[0], nums[1], nums[2]
+        if start is None or step is None or index is None or step <= 0:
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    "Pour la tour de temperature, donne-moi la temperature de depart, le pas et la meilleure section. "
+                    "Ex: tour de temperature depart 230, pas 5, meilleure section 3."
+                ),
+                data={"calibration_type": "temperature_tower"},
+            )
+        result = round(start - index * step)
+        item, candidates = self._resolve_calibration_target(prompt, context)
+        note = self._calibration_target_note(item, candidates, context)
+        proposed_actions = (
+            self._calibration_action(
+                item,
+                f"Appliquer temperature {result} C sur {self._display_stock_item(item)}",
+                {"nozzle_temp_min_c": result, "nozzle_temp_max_c": result, "calibration_type": "temperature_tower"},
+            )
+            if item
+            else []
+        )
+        return AgentResult(
+            intent=Intent.CALIBRATION,
+            answer=(
+                f"Temperature optimale: **{result} C**.\n"
+                f"- temperature de depart: {start:g} C\n- pas: {step:g} C\n- meilleure section: {index:g}\n\n"
+                "Formule: depart - section x pas (la tour imprime du chaud vers le froid)."
+                f"{note}"
+            ),
+            requires_confirmation=bool(proposed_actions),
+            proposed_actions=proposed_actions,
+            data={
+                "calibration_type": "temperature_tower",
+                "optimal_temp_c": result,
+                "start": start,
+                "step": step,
+                "best_section": index,
+            },
+        )
+
+    def _answer_retraction_calibration(self, prompt: str, context: dict) -> AgentResult:
+        text = prompt.lower().replace(",", ".")
+        start = self._find_labeled_value(text, ["depart", "départ", "start"])
+        step = self._find_labeled_value(text, ["pas", "step", "increment"])
+        index = self._find_labeled_value(text, ["meilleure section", "section", "best section", "meilleure", "best"])
+        if start is None or step is None or index is None:
+            nums = self._calibration_numbers(text)
+            if len(nums) >= 3:
+                start, step, index = nums[0], nums[1], nums[2]
+        if start is None or step is None or index is None or step <= 0:
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    "Pour la retraction, donne-moi depart, pas et la meilleure section. "
+                    "Ex: retraction depart 0.2, pas 0.1, meilleure section 4."
+                ),
+                data={"calibration_type": "retraction"},
+            )
+        result = round(start + index * step, 2)
+        item, candidates = self._resolve_calibration_target(prompt, context)
+        note = self._calibration_target_note(item, candidates, context)
+        proposed_actions = (
+            self._calibration_action(
+                item,
+                f"Appliquer retraction {result} mm sur {self._display_stock_item(item)}",
+                {"retraction_distance_mm": result, "calibration_type": "retraction"},
+            )
+            if item
+            else []
+        )
+        return AgentResult(
+            intent=Intent.CALIBRATION,
+            answer=(
+                f"Distance de retraction: **{result} mm**.\n"
+                f"- depart: {start:g} mm\n- pas: {step:g} mm\n- meilleure section: {index:g}\n\n"
+                "Formule: depart + section x pas."
+                f"{note}"
+            ),
+            requires_confirmation=bool(proposed_actions),
+            proposed_actions=proposed_actions,
+            data={
+                "calibration_type": "retraction",
+                "retraction_distance_mm": result,
+                "start": start,
+                "step": step,
+                "best_section": index,
+            },
+        )
+
+    def _answer_vfa_calibration(self, prompt: str, context: dict) -> AgentResult:
+        text = prompt.lower().replace(",", ".")
+        start = self._find_labeled_value(text, ["depart", "départ", "start"])
+        step = self._find_labeled_value(text, ["pas", "step", "increment"])
+        notch = self._find_labeled_value(text, ["encoche", "notch"])
+        temp = self._find_labeled_value(text, ["temperature", "température", "temp"])
+        if start is None or step is None or notch is None:
+            nums = self._calibration_numbers(text)
+            if len(nums) >= 4:
+                start, step, notch, temp = nums[0], nums[1], nums[2], nums[3]
+            elif len(nums) >= 3:
+                start, step, notch = nums[0], nums[1], nums[2]
+        if start is None or step is None or notch is None or step <= 0 or notch < 1:
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    "Pour le VFA, donne-moi depart, pas, l'encoche ou apparaissent les artefacts et la temperature. "
+                    "Ex: VFA depart 160, pas 20, encoche 11, temperature 220."
+                ),
+                data={"calibration_type": "vfa_max_speed"},
+            )
+        vmax = round(start + step * (notch - 1))
+        if temp is None:
+            return AgentResult(
+                intent=Intent.CALIBRATION,
+                answer=(
+                    f"Vitesse max VFA: **{vmax} mm/s** (depart {start:g} + pas {step:g} x (encoche {notch:g} - 1)).\n\n"
+                    "Donne-moi aussi la temperature du test pour que je propose la regle conditionnelle "
+                    "(vitesse max a cette temperature). Ex: ... temperature 220."
+                ),
+                data={"calibration_type": "vfa_max_speed", "vfa_max_speed_mm_s": vmax},
+            )
+        item, candidates = self._resolve_calibration_target(prompt, context)
+        note = self._calibration_target_note(item, candidates, context)
+        proposed_actions = (
+            self._calibration_action(
+                item,
+                f"Appliquer vitesse max {vmax} mm/s a {temp:g} C sur {self._display_stock_item(item)}",
+                {
+                    "vfa_max_speed_mm_s": vmax,
+                    "vfa_temperature_c": temp,
+                    "calibration_type": "vfa_max_speed",
+                },
+            )
+            if item
+            else []
+        )
+        return AgentResult(
+            intent=Intent.CALIBRATION,
+            answer=(
+                f"Vitesse max VFA: **{vmax} mm/s** a **{temp:g} C**.\n"
+                f"- depart: {start:g} mm/s\n- pas: {step:g} mm/s\n- encoche: {notch:g}\n\n"
+                "Formule: depart + pas x (encoche - 1). J'ajoute une regle de vitesse max conditionnelle "
+                "pour cette temperature et je remonte la vitesse max d'impression si besoin."
+                f"{note}"
+            ),
+            requires_confirmation=bool(proposed_actions),
+            proposed_actions=proposed_actions,
+            data={
+                "calibration_type": "vfa_max_speed",
+                "vfa_max_speed_mm_s": vmax,
+                "vfa_temperature_c": temp,
+                "start": start,
+                "step": step,
+                "notch": notch,
+            },
         )
 
     def _extract_volumetric_flow_calibration(

@@ -13,6 +13,7 @@ import {
     IconButton,
 } from '@mui/material';
 import {
+    Calculator,
     Gauge,
     Package,
     Palette,
@@ -32,6 +33,7 @@ import { FilamentOptionsSection } from './filament-modal/FilamentOptionsSection'
 import { FilamentPurchaseSection } from './filament-modal/FilamentPurchaseSection';
 import { FilamentStockSection } from './filament-modal/FilamentStockSection';
 import { FilamentTechnicalSection } from './filament-modal/FilamentTechnicalSection';
+import { CalibrationCalculators } from './filament-modal/CalibrationCalculators';
 import type { CustomOptionCategory, FilamentFormData } from './filament-modal/types';
 
 const parseOptionalNumber = (value: unknown) => {
@@ -821,6 +823,20 @@ export default function AddFilamentModal({
                                 subtitle={t('inventory.filamentModal.technicalSubtitle')}
                             >
                                 <FilamentTechnicalSection t={t} formData={formData} setFormData={setFormData} />
+                            </CollapsibleSection>
+
+                            <CollapsibleSection
+                                icon={<Calculator size={18} />}
+                                title={t('inventory.filamentModal.calibrationTitle', 'Calibration')}
+                                subtitle={t('inventory.filamentModal.calibrationSubtitle', 'Calculateurs et valeurs recommandées')}
+                            >
+                                <CalibrationCalculators
+                                    t={t}
+                                    currentFlowRatio={String(formData.flowRatio ?? '')}
+                                    currentPrintSpeedMax={parseOptionalNumber(String(formData.printSpeedMax ?? ''))}
+                                    currentRules={formData.conditionalTemperatureRules}
+                                    onApply={(patch) => setFormData((p) => ({ ...p, ...patch }))}
+                                />
                             </CollapsibleSection>
 
                             <CollapsibleSection

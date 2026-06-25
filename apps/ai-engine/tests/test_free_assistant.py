@@ -259,6 +259,101 @@ def test_calibration_proposes_action_when_single_filament_in_context() -> None:
     assert action["payload"]["max_volumetric_speed_mm3_s"] == 15.2
 
 
+def _calibration_context(extra: dict | None = None) -> dict:
+    item_kwargs = {
+        "id": "pla-black",
+        "name": "PLA Black",
+        "brand": "BambuLab",
+        "material": "PLA",
+        "color": "Black",
+        "weight_initial_g": 1000,
+        "weight_remaining_g": 740,
+    }
+    item_kwargs.update(extra or {})
+    return {
+        "data_source": "main_api",
+        "active_context": {"mode": "calibration", "filament_ids": ["pla-black"]},
+        "stock_items": [StockItem(**item_kwargs)],
+        "projects": [],
+    }
+
+
+def _run(message: str, context: dict):
+    return asyncio.run(FreeAssistantAgent().run(message, context=context))
+
+
+def test_flow_ratio_calibration_computes_and_proposes_action() -> None:
+    response = _run(
+        "flow ratio largeur cible 0.45 mesuree 0.47",
+        _calibration_context({"flow_ratio": 0.98}),
+    )
+    assert response.intent == Intent.CALIBRATION
+    # 0.98 * 0.45 / 0.47 = 0.938...
+    assert response.data["flow_ratio"] == 0.938
+    action = response.proposed_actions[0]
+    assert action["type"] == "update_filament_calibration"
+    assert action["payload"]["flow_ratio"] == 0.938
+    assert action["payload"]["filament_id"] == "pla-black"
+
+
+def test_pressure_advance_calibration_computes_k_factor() -> None:
+    response = _run(
+        "pressure advance depart 0 pas 0.002 meilleure ligne 35",
+        _calibration_context(),
+    )
+    assert response.intent == Intent.CALIBRATION
+    # 0 + (35 - 1) * 0.002 = 0.068
+    assert response.data["k_factor"] == 0.068
+    assert response.proposed_actions[0]["payload"]["k_factor"] == 0.068
+
+
+def test_temperature_tower_calibration_computes_optimal_temp() -> None:
+    response = _run(
+        "tour de temperature depart 230 pas 5 meilleure section 3",
+        _calibration_context(),
+    )
+    assert response.intent == Intent.CALIBRATION
+    # 230 - 3 * 5 = 215
+    assert response.data["optimal_temp_c"] == 215
+    payload = response.proposed_actions[0]["payload"]
+    assert payload["nozzle_temp_min_c"] == 215
+    assert payload["nozzle_temp_max_c"] == 215
+
+
+def test_retraction_calibration_computes_distance() -> None:
+    response = _run(
+        "retraction depart 0.2 pas 0.1 meilleure section 4",
+        _calibration_context(),
+    )
+    assert response.intent == Intent.CALIBRATION
+    # 0.2 + 4 * 0.1 = 0.6
+    assert response.data["retraction_distance_mm"] == 0.6
+    assert response.proposed_actions[0]["payload"]["retraction_distance_mm"] == 0.6
+
+
+def test_vfa_calibration_computes_max_speed_and_temperature_payload() -> None:
+    response = _run(
+        "VFA depart 160 pas 20 encoche 11 temperature 220",
+        _calibration_context(),
+    )
+    assert response.intent == Intent.CALIBRATION
+    # 160 + 20 * (11 - 1) = 360
+    assert response.data["vfa_max_speed_mm_s"] == 360
+    payload = response.proposed_actions[0]["payload"]
+    assert payload["vfa_max_speed_mm_s"] == 360
+    assert payload["vfa_temperature_c"] == 220
+
+
+def test_vfa_calibration_asks_for_temperature_when_missing() -> None:
+    response = _run(
+        "VFA depart 160 pas 20 encoche 11",
+        _calibration_context(),
+    )
+    assert response.intent == Intent.CALIBRATION
+    assert response.data["vfa_max_speed_mm_s"] == 360
+    assert response.proposed_actions == []
+
+
 def test_capabilities_lists_calibration() -> None:
     response = capabilities()
     intent_names = {intent.name for intent in response.intents}
