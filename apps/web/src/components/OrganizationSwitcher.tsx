@@ -1,15 +1,38 @@
-import { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+    Box,
+    Button,
+    ButtonBase,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    ListItemIcon,
+    ListItemText,
+    Menu,
+    MenuItem,
+    Stack,
+    TextField,
+    Typography,
+    useTheme
+} from '@mui/material';
+import { Building2, Check, ChevronDown, Plus } from 'lucide-react';
 import { api, BASE_URL } from '../api';
 import type { UserOrganization } from '../api';
-import { useTranslation } from 'react-i18next';
+import { useAuth } from '../contexts/AuthContext';
 
-export function OrganizationSwitcher() {
+type OrganizationSwitcherProps = {
+    variant?: 'default' | 'compact';
+};
+
+export function OrganizationSwitcher({ variant = 'default' }: OrganizationSwitcherProps) {
     const { token } = useAuth();
     const { t } = useTranslation();
+    const theme = useTheme();
     const [userOrgs, setUserOrgs] = useState<UserOrganization[]>([]);
     const [currentOrgId, setCurrentOrgId] = useState<number>(1);
-    const [showDropdown, setShowDropdown] = useState(false);
+    const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [newOrgName, setNewOrgName] = useState('');
 
@@ -30,16 +53,18 @@ export function OrganizationSwitcher() {
         }
     };
 
+    const closeMenu = () => setAnchorEl(null);
+
     const switchOrganization = async (orgId: number) => {
         setCurrentOrgId(orgId);
         localStorage.setItem('organization_id', orgId.toString());
-        setShowDropdown(false);
+        closeMenu();
         try {
             await api.setActiveOrganization(orgId);
         } catch (error) {
             console.error('Failed to persist active organization:', error);
         }
-        window.location.reload(); // Reload to fetch new org data
+        window.location.reload();
     };
 
     const handleAccept = async (e: React.MouseEvent, orgId: number) => {
@@ -77,7 +102,6 @@ export function OrganizationSwitcher() {
             });
 
             if (response.ok) {
-                // Refresh list
                 fetchOrganizations();
                 setShowCreateModal(false);
                 setNewOrgName('');
@@ -87,203 +111,159 @@ export function OrganizationSwitcher() {
         }
     };
 
-    const currentOrgEntry = userOrgs.find(uo => uo.organization.id === currentOrgId);
+    const currentOrgEntry = userOrgs.find((uo) => uo.organization.id === currentOrgId);
     const currentOrgName = currentOrgEntry ? currentOrgEntry.organization.name : t('common.selectOrg', 'Select Organization');
+    const isCompact = variant === 'compact';
 
     return (
-        <div style={{ position: 'relative' }}>
-            {/* Organization Selector Button */}
-            <button
-                onClick={() => setShowDropdown(!showDropdown)}
-                style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '8px 12px',
-                    backgroundColor: '#f3f4f6',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
+        <>
+            <ButtonBase
+                onClick={(event) => setAnchorEl(event.currentTarget)}
+                sx={{
+                    height: isCompact ? 38 : 40,
+                    maxWidth: isCompact ? { sm: 180, md: 230 } : 320,
+                    px: isCompact ? 1 : 1.5,
+                    borderRadius: isCompact ? '999px' : '8px',
+                    border: `1px solid ${theme.palette.divider}`,
+                    bgcolor: isCompact ? 'background.paper' : 'action.hover',
+                    color: 'text.primary',
+                    gap: 0.75,
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                        borderColor: 'primary.main',
+                        bgcolor: isCompact ? 'primary.light' : 'action.selected',
+                    },
                 }}
             >
-                <span>🏢</span>
-                <span>{currentOrgName}</span>
-                <span style={{ fontSize: '12px' }}>▼</span>
-            </button>
+                <Building2 size={isCompact ? 17 : 18} color={theme.palette.primary.main} />
+                <Typography
+                    variant="body2"
+                    fontWeight={700}
+                    noWrap
+                    sx={{ minWidth: 0, maxWidth: isCompact ? { sm: 116, md: 168 } : 240 }}
+                >
+                    {currentOrgName}
+                </Typography>
+                <ChevronDown size={15} color={theme.palette.text.secondary} />
+            </ButtonBase>
 
-            {/* Dropdown Menu */}
-            {showDropdown && (
-                <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: '4px',
-                    backgroundColor: 'white',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-                    minWidth: '300px',
-                    zIndex: 1000,
-                    maxHeight: '400px',
-                    overflowY: 'auto'
-                }}>
-                    <div style={{ padding: '8px 0' }}>
-                        {userOrgs.map(uo => (
-                            <div
-                                key={uo.id}
-                                style={{
-                                    padding: '10px 16px',
-                                    borderBottom: '1px solid #f3f4f6',
-                                    background: uo.organization.id === currentOrgId ? '#f3f4f6' : 'white',
-                                }}
-                            >
-                                <div
-                                    onClick={() => uo.hasConfirmed && switchOrganization(uo.organization.id)}
-                                    style={{
-                                        cursor: uo.hasConfirmed ? 'pointer' : 'default',
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        opacity: uo.hasConfirmed ? 1 : 0.7
-                                    }}
-                                >
-                                    <div>
-                                        <div style={{ fontWeight: '500' }}>{uo.organization.name}</div>
-                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                            {uo.organization.plan?.toUpperCase()} • {uo.role.toUpperCase()}
-                                        </div>
-                                        {(uo.organization.manualPlanEndDate || uo.organization.stripeSubscriptionEndDate || uo.organization.trialEndsAt) && (
-                                            <div style={{ fontSize: '10px', color: '#9ca3af', marginTop: '2px', fontStyle: 'italic' }}>
-                                                {t('admin.manualPlanEndDate')}: {new Date(uo.organization.manualPlanEndDate || uo.organization.stripeSubscriptionEndDate || uo.organization.trialEndsAt!).toLocaleDateString()}
-                                            </div>
-                                        )}
-                                    </div>
-                                    {uo.hasConfirmed && uo.organization.id === currentOrgId && <span>✓</span>}
-                                </div>
+            <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={closeMenu}
+                PaperProps={{
+                    elevation: 0,
+                    sx: {
+                        mt: 1,
+                        width: 320,
+                        maxWidth: 'calc(100vw - 24px)',
+                        borderRadius: '10px',
+                        border: `1px solid ${theme.palette.divider}`,
+                        boxShadow: '0 12px 30px rgba(15, 23, 42, 0.18)',
+                    },
+                }}
+                transformOrigin={{ horizontal: 'left', vertical: 'top' }}
+                anchorOrigin={{ horizontal: 'left', vertical: 'bottom' }}
+            >
+                {userOrgs.map((uo) => {
+                    const isActive = uo.organization.id === currentOrgId;
+                    const plan = uo.organization.plan ? uo.organization.plan.toUpperCase() : t('common.none', 'None');
 
-                                {!uo.hasConfirmed && (
-                                    <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-                                        <button
-                                            onClick={(e) => handleAccept(e, uo.organization.id)}
-                                            style={{
-                                                fontSize: '12px', padding: '4px 8px', borderRadius: '4px',
-                                                border: 'none', background: '#22c55e', color: 'white', cursor: 'pointer'
-                                            }}
-                                        >
-                                            {t('common.accept', 'Accept')}
-                                        </button>
-                                        <button
-                                            onClick={(e) => handleDecline(e, uo.organization.id)}
-                                            style={{
-                                                fontSize: '12px', padding: '4px 8px', borderRadius: '4px',
-                                                border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', cursor: 'pointer'
-                                            }}
-                                        >
-                                            {t('common.decline', 'Decline')}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-
-                    <div style={{ borderTop: '1px solid #e5e7eb', padding: '8px' }}>
-                        <button
-                            onClick={() => {
-                                setShowDropdown(false);
-                                setShowCreateModal(true);
-                            }}
-                            style={{
-                                width: '100%',
-                                padding: '8px 12px',
-                                backgroundColor: '#6366f1',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontWeight: '500',
-                            }}
+                    return (
+                        <MenuItem
+                            key={uo.id}
+                            onClick={() => uo.hasConfirmed && switchOrganization(uo.organization.id)}
+                            disabled={!uo.hasConfirmed}
+                            selected={isActive}
+                            sx={{ alignItems: 'flex-start', py: 1.25, gap: 1 }}
                         >
-                            + {t('common.createOrg', 'Create New Organization')}
-                        </button>
-                    </div>
-                </div>
-            )}
+                            <ListItemText
+                                primary={uo.organization.name}
+                                secondary={
+                                    <Stack spacing={0.25}>
+                                        <Typography variant="caption" color="text.secondary">
+                                            {plan} - {uo.role.toUpperCase()}
+                                        </Typography>
+                                        {(uo.organization.manualPlanEndDate || uo.organization.stripeSubscriptionEndDate || uo.organization.trialEndsAt) && (
+                                            <Typography variant="caption" color="text.disabled">
+                                                {t('admin.manualPlanEndDate')}: {new Date(uo.organization.manualPlanEndDate || uo.organization.stripeSubscriptionEndDate || uo.organization.trialEndsAt!).toLocaleDateString()}
+                                            </Typography>
+                                        )}
+                                        {!uo.hasConfirmed && (
+                                            <Box sx={{ display: 'flex', gap: 1, pt: 0.5 }}>
+                                                <Button
+                                                    size="small"
+                                                    variant="contained"
+                                                    color="success"
+                                                    onClick={(e) => handleAccept(e, uo.organization.id)}
+                                                >
+                                                    {t('common.accept', 'Accept')}
+                                                </Button>
+                                                <Button
+                                                    size="small"
+                                                    variant="outlined"
+                                                    color="error"
+                                                    onClick={(e) => handleDecline(e, uo.organization.id)}
+                                                >
+                                                    {t('common.decline', 'Decline')}
+                                                </Button>
+                                            </Box>
+                                        )}
+                                    </Stack>
+                                }
+                                primaryTypographyProps={{ fontWeight: 700, noWrap: true }}
+                            />
+                            {uo.hasConfirmed && isActive && (
+                                <ListItemIcon sx={{ minWidth: 24, color: 'success.main', mt: 0.25 }}>
+                                    <Check size={18} />
+                                </ListItemIcon>
+                            )}
+                        </MenuItem>
+                    );
+                })}
 
-            {/* Create Organization Modal */}
-            {showCreateModal && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 2000,
-                }}>
-                    <div style={{
-                        backgroundColor: 'white',
-                        padding: '24px',
-                        borderRadius: '12px',
-                        maxWidth: '400px',
-                        width: '90%',
-                    }}>
-                        <h2 style={{ marginTop: 0 }}>{t('common.createOrg', 'Create New Organization')}</h2>
-                        <input
-                            type="text"
-                            value={newOrgName}
-                            onChange={(e) => setNewOrgName(e.target.value)}
-                            placeholder={t('settings.placeholders.organization', 'Organization name')}
-                            style={{
-                                width: '100%',
-                                padding: '10px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '6px',
-                                marginBottom: '16px',
-                                fontSize: '14px',
-                            }}
-                            onKeyPress={(e) => e.key === 'Enter' && createOrganization()}
-                        />
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                            <button
-                                onClick={() => {
-                                    setShowCreateModal(false);
-                                    setNewOrgName('');
-                                }}
-                                style={{
-                                    padding: '8px 16px',
-                                    border: '1px solid #d1d5db',
-                                    borderRadius: '6px',
-                                    backgroundColor: 'white',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                {t('common.cancel', 'Cancel')}
-                            </button>
-                            <button
-                                onClick={createOrganization}
-                                style={{
-                                    padding: '8px 16px',
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    backgroundColor: '#6366f1',
-                                    color: 'white',
-                                    cursor: 'pointer',
-                                    fontWeight: '500',
-                                }}
-                            >
-                                {t('common.create', 'Create')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+                <Box sx={{ p: 1, borderTop: `1px solid ${theme.palette.divider}` }}>
+                    <Button
+                        fullWidth
+                        variant="contained"
+                        startIcon={<Plus size={16} />}
+                        onClick={() => {
+                            closeMenu();
+                            setShowCreateModal(true);
+                        }}
+                    >
+                        {t('common.createOrg', 'Create New Organization')}
+                    </Button>
+                </Box>
+            </Menu>
+
+            <Dialog open={showCreateModal} onClose={() => setShowCreateModal(false)} maxWidth="xs" fullWidth>
+                <DialogTitle>{t('common.createOrg', 'Create New Organization')}</DialogTitle>
+                <DialogContent>
+                    <TextField
+                        fullWidth
+                        autoFocus
+                        value={newOrgName}
+                        onChange={(e) => setNewOrgName(e.target.value)}
+                        label={t('settings.placeholders.organization', 'Organization name')}
+                        onKeyDown={(e) => e.key === 'Enter' && createOrganization()}
+                        sx={{ mt: 1 }}
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <Button
+                        onClick={() => {
+                            setShowCreateModal(false);
+                            setNewOrgName('');
+                        }}
+                    >
+                        {t('common.cancel', 'Cancel')}
+                    </Button>
+                    <Button onClick={createOrganization} variant="contained">
+                        {t('common.create', 'Create')}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+        </>
     );
 }
-

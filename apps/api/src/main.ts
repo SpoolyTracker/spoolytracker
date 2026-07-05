@@ -1,8 +1,8 @@
 import { NestFactory, Reflector } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import * as express from 'express';
 import cookieParser from 'cookie-parser';
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './common/logger/logger.config';
@@ -28,10 +28,14 @@ function getAllowedCorsOrigins(): string[] {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
     logger: WinstonModule.createLogger(winstonConfig),
   });
+  const bodyLimit =
+    process.env.REQUEST_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '25mb';
+  app.useBodyParser('json', { limit: bodyLimit });
+  app.useBodyParser('urlencoded', { limit: bodyLimit, extended: true });
 
   // Trust proxy is required for secure cookies behind Nginx
   app.getHttpAdapter().getInstance().set('trust proxy', 1);

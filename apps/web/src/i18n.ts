@@ -94,6 +94,36 @@ const resources = {
                 "saving": "Saving...",
                 "howItWorks": "How it works?"
             },
+            "aiEngineStatus": {
+                "status": {
+                    "checking": "AI...",
+                    "api": "AI API",
+                    "mock": "AI mock",
+                    "down": "AI off"
+                },
+                "tier": {
+                    "pro": "Pro",
+                    "free": "Free",
+                    "unknown": "Plan?"
+                },
+                "tooltip": {
+                    "checking": "Checking the AI engine.",
+                    "api": "AI engine connected to real organization data.",
+                    "mock": "AI engine active in demo/offline mode. Displayed data may be mocked.",
+                    "down": "AI engine is currently unavailable."
+                },
+                "detail": {
+                    "source": "Source",
+                    "api": "API",
+                    "reason": "Reason",
+                    "llm": "LLM",
+                    "active": "active",
+                    "inactive": "inactive",
+                    "tier": "AI tier",
+                    "proDescription": "Pro persistent intelligence",
+                    "freeDescription": "Free basic suggestions"
+                }
+            },
             "nfcModal": {
                 "reading": "Reading tag...",
                 "spoolFound": "Spool Found",
@@ -455,7 +485,8 @@ const resources = {
                     "organization": "Organization",
                     "members": "Members",
                     "profile": "Profile",
-                    "downloads": "Downloads"
+                    "downloads": "Downloads",
+                    "dataPortability": "Import / Export"
                 },
                 "pendingInvitations": "Pending Invitations",
                 "invitedAs": "Invited as",
@@ -513,6 +544,91 @@ const resources = {
                 "confirmDeleteOrg": "Are you sure you want to delete this organization? This action cannot be undone.",
                 "lowStockThreshold": "Global Low Stock Threshold (g)",
                 "lowStockThresholdDesc": "Default weight below which a filament is considered low stock",
+                "dataPortability": {
+                    "title": "Server Import / Export",
+                    "description": "Export or inspect this organization's data with the new versioned server format.",
+                    "adminOnly": "Only organization administrators can use import/export.",
+                    "includeTitle": "Data to include",
+                    "includeGlobalReferences": "Include useful global reference data",
+                    "processing": "Processing...",
+                    "exportJson": "Export JSON",
+                    "inspectImport": "Inspect import",
+                    "inspectDescription": "Load a server export or an old mobile backup to display scopes, warnings, and field differences before any write.",
+                    "previewMode": "Preview mode",
+                    "replaceMode": "Replace selected scopes",
+                    "mergeMode": "Merge without deletion",
+                    "chooseJson": "Choose a JSON file",
+                    "fileDiagnostic": "File diagnostic",
+                    "format": "Format",
+                    "schemaVersion": "Schema version",
+                    "exportedAt": "Export",
+                    "unknown": "unknown",
+                    "scopesLabel": "Scopes",
+                    "support": "Support",
+                    "supported": "OK",
+                    "unsupported": "Unsupported",
+                    "importPreview": "Import preview",
+                    "previewValid": "Preview valid.",
+                    "previewBlocked": "Preview blocked by missing required fields.",
+                    "fieldDifferences": "Field differences",
+                    "finalImport": "Final import",
+                    "finalImportPending": "The API can inspect and preview. Transactional commit is coming next.",
+                    "finalImportReady": "Preview is valid. The import will run transactionally on the server.",
+                    "confirmReplace": "Replace selected data with this import? This action overwrites the selected scopes.",
+                    "confirmMerge": "Merge this import into the current organization?",
+                    "importComplete": "Import complete",
+                    "scopes": {
+                        "referenceData": {
+                            "label": "References",
+                            "description": "Brands, materials, types, options, catalogs and colors."
+                        },
+                        "inventory": {
+                            "label": "Inventory",
+                            "description": "Spools, storage, placements and technical settings."
+                        },
+                        "consumption": {
+                            "label": "Consumption",
+                            "description": "Manual history, prints and planned consumption."
+                        },
+                        "projects": {
+                            "label": "Projects",
+                            "description": "Projects, filament BOM, external purchases, files and analyses."
+                        },
+                        "organizationSettings": {
+                            "label": "Organization settings",
+                            "description": "Exportable business settings for the organization."
+                        }
+                    },
+                    "counts": {
+                        "brands": "brands",
+                        "materials": "materials",
+                        "types": "types",
+                        "options": "options",
+                        "brandCatalog": "brand catalog",
+                        "colorReferences": "color references",
+                        "filaments": "spools",
+                        "storageUnits": "storage units",
+                        "logs": "logs",
+                        "projects": "projects",
+                        "organization": "organization"
+                    },
+                    "differenceKinds": {
+                        "unknown": "unknown",
+                        "missing": "missing"
+                    },
+                    "warnings": {
+                        "legacyMobile": "Legacy mobile backup detected. Projects, project files, storage details, color references, and organization settings may be absent.",
+                        "schemaMigration": "This export schema version will need migration before import.",
+                        "unknownFields": "Unknown fields were found and will be shown before commit.",
+                        "referenceReplaceNeedsInventory": "Replacing reference data requires the inventory scope. Use merge or include inventory."
+                    },
+                    "errors": {
+                        "exportFailed": "Export failed.",
+                        "invalidJson": "Invalid JSON file.",
+                        "previewFailed": "Preview failed.",
+                        "commitFailed": "Import failed."
+                    }
+                },
                 "downloads": {
                     "title": "Client Applications",
                     "description": "Download the bridge applications to connect your hardware to Spooly.",
@@ -1204,6 +1320,36 @@ const resources = {
                 "saving": "Enregistrement...",
                 "howItWorks": "Comment ça marche ?"
             },
+            "aiEngineStatus": {
+                "status": {
+                    "checking": "IA...",
+                    "api": "IA API",
+                    "mock": "IA mock",
+                    "down": "IA off"
+                },
+                "tier": {
+                    "pro": "Pro",
+                    "free": "Free",
+                    "unknown": "Plan?"
+                },
+                "tooltip": {
+                    "checking": "Verification du moteur IA en cours.",
+                    "api": "Moteur IA connecte aux donnees reelles de votre organisation.",
+                    "mock": "Moteur IA actif en mode demo/offline. Les donnees affichees peuvent etre mockees.",
+                    "down": "Moteur IA indisponible pour le moment."
+                },
+                "detail": {
+                    "source": "Source",
+                    "api": "API",
+                    "reason": "Raison",
+                    "llm": "LLM",
+                    "active": "actif",
+                    "inactive": "inactif",
+                    "tier": "Niveau IA",
+                    "proDescription": "Pro avec intelligence persistante",
+                    "freeDescription": "Free avec suggestions de base"
+                }
+            },
             "nfcModal": {
                 "reading": "Lecture du tag...",
                 "spoolFound": "Bobine trouvee",
@@ -1568,6 +1714,7 @@ const resources = {
                     "organization": "Organisation",
                     "members": "Membres",
                     "profile": "Profil",
+                    "dataPortability": "Import / Export",
                     "downloads": "Téléchargements"
                 },
                 "pendingInvitations": "Invitations en attente",
@@ -1626,6 +1773,91 @@ const resources = {
                 "confirmDeleteOrg": "Êtes-vous sûr de vouloir supprimer cette organisation ? Cette action est irréversible et supprimera toutes les données associées.",
                 "lowStockThreshold": "Seuil de stock faible global (g)",
                 "lowStockThresholdDesc": "Poids par défaut en dessous duquel un filament est considéré en stock faible",
+                "dataPortability": {
+                    "title": "Import / Export serveur",
+                    "description": "Exporte ou inspecte les donnees de cette organisation avec le nouveau format serveur versionne.",
+                    "adminOnly": "Seuls les administrateurs de l'organisation peuvent utiliser l'import/export.",
+                    "includeTitle": "Donnees a inclure",
+                    "includeGlobalReferences": "Inclure les references globales utiles",
+                    "processing": "Traitement...",
+                    "exportJson": "Exporter JSON",
+                    "inspectImport": "Inspecter un import",
+                    "inspectDescription": "Charge un export serveur ou un vieux backup mobile pour afficher les scopes, warnings et differences de champs avant toute ecriture.",
+                    "previewMode": "Mode preview",
+                    "replaceMode": "Remplacer les scopes choisis",
+                    "mergeMode": "Fusionner sans suppression",
+                    "chooseJson": "Choisir un fichier JSON",
+                    "fileDiagnostic": "Diagnostic fichier",
+                    "format": "Format",
+                    "schemaVersion": "Version schema",
+                    "exportedAt": "Export",
+                    "unknown": "inconnu",
+                    "scopesLabel": "Scopes",
+                    "support": "Support",
+                    "supported": "OK",
+                    "unsupported": "Non supporte",
+                    "importPreview": "Preview import",
+                    "previewValid": "Preview valide.",
+                    "previewBlocked": "Preview bloquee par des champs requis manquants.",
+                    "fieldDifferences": "Differences de champs",
+                    "finalImport": "Import final",
+                    "finalImportPending": "L'API sait inspecter et previsualiser. Le commit transactionnel arrive dans la prochaine passe.",
+                    "finalImportReady": "La preview est valide. L'import sera execute en transaction cote serveur.",
+                    "confirmReplace": "Remplacer les donnees selectionnees avec cet import ? Cette action ecrase les scopes choisis.",
+                    "confirmMerge": "Fusionner cet import dans l'organisation actuelle ?",
+                    "importComplete": "Import termine",
+                    "scopes": {
+                        "referenceData": {
+                            "label": "References",
+                            "description": "Marques, materiaux, types, options, catalogues et couleurs."
+                        },
+                        "inventory": {
+                            "label": "Inventaire",
+                            "description": "Bobines, stockage, placements et reglages techniques."
+                        },
+                        "consumption": {
+                            "label": "Consommations",
+                            "description": "Historique manuel, impressions, consommations planifiees."
+                        },
+                        "projects": {
+                            "label": "Projets",
+                            "description": "Projets, BOM filament, achats externes, fichiers et analyses."
+                        },
+                        "organizationSettings": {
+                            "label": "Parametres org",
+                            "description": "Parametres metier exportables de l'organisation."
+                        }
+                    },
+                    "counts": {
+                        "brands": "marques",
+                        "materials": "materiaux",
+                        "types": "types",
+                        "options": "options",
+                        "brandCatalog": "catalogue marques",
+                        "colorReferences": "references couleur",
+                        "filaments": "bobines",
+                        "storageUnits": "stockages",
+                        "logs": "consommations",
+                        "projects": "projets",
+                        "organization": "organisation"
+                    },
+                    "differenceKinds": {
+                        "unknown": "inconnu",
+                        "missing": "manquant"
+                    },
+                    "warnings": {
+                        "legacyMobile": "Vieux backup mobile detecte. Les projets, fichiers projet, details de stockage, references couleur et parametres org peuvent etre absents.",
+                        "schemaMigration": "Cette version de schema devra etre migree avant import.",
+                        "unknownFields": "Des champs inconnus ont ete trouves et seront affiches avant le commit.",
+                        "referenceReplaceNeedsInventory": "Remplacer les donnees de reference exige le scope inventaire. Utilisez fusionner ou incluez l'inventaire."
+                    },
+                    "errors": {
+                        "exportFailed": "Export impossible.",
+                        "invalidJson": "Fichier JSON invalide.",
+                        "previewFailed": "Preview impossible.",
+                        "commitFailed": "Import impossible."
+                    }
+                },
                 "downloads": {
                     "title": "Applications Client",
                     "description": "Téléchargez les applications pont pour connecter votre matériel à Spooly.",
