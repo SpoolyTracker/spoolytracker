@@ -29,6 +29,7 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { PublicApiModule } from './public-api/public-api.module';
 import { BootstrapAdminModule } from './bootstrap/bootstrap-admin.module';
+import { DataPortabilityModule } from './data-portability/data-portability.module';
 
 @Module({
   imports: [
@@ -106,6 +107,7 @@ import { BootstrapAdminModule } from './bootstrap/bootstrap-admin.module';
     IntegrationsModule,
     PublicApiModule,
     BootstrapAdminModule,
+    DataPortabilityModule,
   ],
   controllers: [AppController, UploadsController, PublicController],
   providers: [AppService],
@@ -114,6 +116,14 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
       .apply(TenantMiddleware)
-      .forRoutes('filaments', 'projects', 'gcode', 'upload', 'ai', 'api-keys');
+      .forRoutes(
+        'filaments',
+        'projects',
+        'gcode',
+        'upload',
+        'ai',
+        'api-keys',
+        'data-portability',
+      );
   }
 }

@@ -6,8 +6,8 @@ import { OrganizationSwitcher } from '../components/OrganizationSwitcher';
 import { PendingInvitations } from '../components/PendingInvitations';
 import { SubscriptionHistory } from '../components/SubscriptionHistory';
 import { Box } from '@mui/material';
-import { Building, User, Users, Eye, EyeOff, Download, Printer as PrinterIcon, Nfc, Trash2, Bell, Settings as SettingsIcon, KeyRound, Copy, FileCode2, Monitor } from 'lucide-react';
-import { api, BASE_URL, type ApiKeySummary } from '../api';
+import { Building, User, Users, Eye, EyeOff, Download, Printer as PrinterIcon, Nfc, Trash2, Bell, Settings as SettingsIcon, KeyRound, Copy, FileCode2, Monitor, Upload, Database, FileWarning } from 'lucide-react';
+import { api, BASE_URL, type ApiKeySummary, type DataPortabilityCommitResult, type DataPortabilityInspection, type DataPortabilityPreview, type DataPortabilityScope } from '../api';
 import { getEnv } from '../runtimeEnv';
 import { SecureImage } from '../components/SecureImage';
 import PageHeader from '../components/PageHeader';
@@ -19,6 +19,14 @@ interface Member {
     username: string;
     role: 'owner' | 'admin' | 'member';
 }
+
+const dataScopeOptions: DataPortabilityScope[] = [
+    'referenceData',
+    'inventory',
+    'consumption',
+    'projects',
+    'organizationSettings',
+];
 
 const GoogleIcon = ({ size = 16 }: { size?: number }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -42,7 +50,7 @@ export default function SettingsPage() {
     const currentOrgId = localStorage.getItem('organization_id') || '1';
     // True when the dashboard runs inside the Electron desktop app (no point offering its own download there).
     const isDesktopApp = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent);
-    const [activeTab, setActiveTab] = useState<'organization' | 'members' | 'profile' | 'integrations' | 'downloads' | 'notifications'>('organization');
+    const [activeTab, setActiveTab] = useState<'organization' | 'members' | 'profile' | 'integrations' | 'downloads' | 'notifications' | 'data'>('organization');
     const [organization, setOrganization] = useState<any>(null);
     const [orgSettings, setOrgSettings] = useState<{ lowStockThreshold: number | null, lowStockThresholdType: string, aiAlertCooldownHours?: number | null }>({ lowStockThreshold: null, lowStockThresholdType: 'GRAMS' });
     const [saving, setSaving] = useState(false);
@@ -57,6 +65,15 @@ export default function SettingsPage() {
     const [apiKeyName, setApiKeyName] = useState('Application tierce');
     const [selectedApiScopes, setSelectedApiScopes] = useState<string[]>(['filaments:read', 'stock:read']);
     const [apiKeyExpiresAt, setApiKeyExpiresAt] = useState('');
+    const [dataScopes, setDataScopes] = useState<DataPortabilityScope[]>(dataScopeOptions);
+    const [includeGlobalReferenceData, setIncludeGlobalReferenceData] = useState(true);
+    const [dataImportMode, setDataImportMode] = useState<'replace' | 'merge'>('replace');
+    const [dataBusy, setDataBusy] = useState(false);
+    const [dataImportPayload, setDataImportPayload] = useState<unknown | null>(null);
+    const [dataInspection, setDataInspection] = useState<DataPortabilityInspection | null>(null);
+    const [dataPreview, setDataPreview] = useState<DataPortabilityPreview | null>(null);
+    const [dataCommitResult, setDataCommitResult] = useState<DataPortabilityCommitResult | null>(null);
+    const [dataError, setDataError] = useState('');
     const exampleApiKey = newApiKey || 'sk_zsp_xxx';
     const publicApiExample = `curl ${BASE_URL}/public-api/v1/filaments -H "Authorization: Bearer ${exampleApiKey}"`;
     const orcaCommand = publicApiExample;
@@ -76,6 +93,166 @@ export default function SettingsPage() {
         'projects:read': 'Lire les projets exposes publiquement.',
         'projects:write': 'Creer ou modifier des projets exposes publiquement.',
         'gcode:inspect': 'Analyser des fichiers G-code via integration publique.',
+    };
+
+    const toggleDataScope = (scope: DataPortabilityScope) => {
+        setDataScopes(prev =>
+            prev.includes(scope)
+                ? prev.filter(item => item !== scope)
+                : [...prev, scope]
+        );
+        if (dataImportPayload) {
+            setDataPreview(null);
+            setDataCommitResult(null);
+        }
+    };
+
+    const selectedDataScopes = dataScopes.length ? dataScopes : dataScopeOptions;
+
+    const getDataScopeLabel = (scope: DataPortabilityScope | string) =>
+        t(`settings.dataPortability.scopes.${scope}.label`, scope);
+
+    const getDataScopeDescription = (scope: DataPortabilityScope | string) =>
+        t(`settings.dataPortability.scopes.${scope}.description`, '');
+
+    const getDataCountLabel = (key: string) =>
+        t(`settings.dataPortability.counts.${key}`, key);
+
+    const getDataDifferenceKindLabel = (kind: string) =>
+        t(`settings.dataPortability.differenceKinds.${kind}`, kind);
+
+    const getDataWarningLabel = (warning: string) => {
+        if (warning.includes('Legacy mobile backup detected')) {
+            return t('settings.dataPortability.warnings.legacyMobile');
+        }
+        if (warning.includes('will need migration')) {
+            return t('settings.dataPortability.warnings.schemaMigration');
+        }
+        if (warning.includes('Unknown fields')) {
+            return t('settings.dataPortability.warnings.unknownFields');
+        }
+        if (warning.includes('Replacing reference data requires inventory scope')) {
+            return t('settings.dataPortability.warnings.referenceReplaceNeedsInventory');
+        }
+        return warning;
+    };
+
+    const downloadJson = (payload: unknown, filename: string) => {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    };
+
+    const getExportOrgSlug = () => {
+        const rawName = organization?.name || `org-${currentOrgId}`;
+        const slug = String(rawName)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        return slug || `org-${currentOrgId}`;
+    };
+
+    const handleDataExport = async () => {
+        if (!isAdminOrOwner) return;
+        setDataBusy(true);
+        setDataError('');
+        try {
+            const exportPayload = await api.exportData({
+                scopes: selectedDataScopes,
+                includeGlobalReferenceData,
+            });
+            const date = new Date().toISOString().slice(0, 10);
+            downloadJson(exportPayload, `spooly-export-${getExportOrgSlug()}-${date}.json`);
+        } catch (err: any) {
+            setDataError(err?.message || t('settings.dataPortability.errors.exportFailed'));
+        } finally {
+            setDataBusy(false);
+        }
+    };
+
+    const handleDataImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+
+        setDataBusy(true);
+        setDataError('');
+        setDataInspection(null);
+        setDataPreview(null);
+        setDataCommitResult(null);
+
+        try {
+            const text = await file.text();
+            const payload = JSON.parse(text);
+            setDataImportPayload(payload);
+            const inspection = await api.inspectDataImport(payload);
+            setDataInspection(inspection);
+            const importScopes = inspection.scopes.length ? inspection.scopes : selectedDataScopes;
+            const preview = await api.previewDataImport(payload, {
+                mode: dataImportMode,
+                scopes: importScopes,
+            });
+            setDataPreview(preview);
+            setDataScopes(importScopes);
+        } catch (err: any) {
+            setDataImportPayload(null);
+            setDataError(err?.message || t('settings.dataPortability.errors.invalidJson'));
+        } finally {
+            setDataBusy(false);
+        }
+    };
+
+    const refreshDataPreview = async (mode = dataImportMode, scopes = selectedDataScopes) => {
+        if (!dataImportPayload) return;
+        setDataBusy(true);
+        setDataError('');
+        try {
+            const preview = await api.previewDataImport(dataImportPayload, { mode, scopes });
+            setDataPreview(preview);
+        } catch (err: any) {
+            setDataError(err?.message || t('settings.dataPortability.errors.previewFailed'));
+        } finally {
+            setDataBusy(false);
+        }
+    };
+
+    const handleDataModeChange = (mode: 'replace' | 'merge') => {
+        setDataImportMode(mode);
+        refreshDataPreview(mode);
+    };
+
+    const handleDataCommit = async () => {
+        if (!dataImportPayload || !dataPreview?.canCommit || !dataPreview.commitEndpointReady) return;
+        const message = dataImportMode === 'replace'
+            ? t('settings.dataPortability.confirmReplace')
+            : t('settings.dataPortability.confirmMerge');
+        if (!confirm(message)) return;
+
+        setDataBusy(true);
+        setDataError('');
+        try {
+            const result = await api.commitDataImport(dataImportPayload, {
+                mode: dataImportMode,
+                scopes: dataPreview.selectedScopes,
+            });
+            setDataCommitResult(result);
+            setDataPreview(null);
+            setDataInspection(null);
+            setDataImportPayload(null);
+            await fetchOrganization();
+        } catch (err: any) {
+            setDataError(err?.message || t('settings.dataPortability.errors.commitFailed'));
+        } finally {
+            setDataBusy(false);
+        }
     };
 
     useEffect(() => {
@@ -622,6 +799,7 @@ export default function SettingsPage() {
                     { id: 'profile', label: t('settings.tabs.profile'), icon: <User size={16} /> },
                     { id: 'notifications', label: t('settings.tabs.notifications', 'Notifications'), icon: <Bell size={16} /> },
                     { id: 'integrations', label: 'Intégrations', icon: <KeyRound size={16} /> },
+                    { id: 'data', label: t('settings.tabs.dataPortability'), icon: <Database size={16} /> },
                     { id: 'downloads', label: t('settings.tabs.downloads'), icon: <Download size={16} /> },
                 ].map(tab => (
                     <>
@@ -2100,6 +2278,234 @@ export default function SettingsPage() {
                             </div>
                         )}
                     </div>
+                </div>
+            )}
+
+            {/* Data Import / Export Tab */}
+            {activeTab === 'data' && (
+                <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)' }}>
+                    <h2 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Database size={20} />
+                        {t('settings.dataPortability.title')}
+                    </h2>
+                    <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '14px' }}>
+                        {t('settings.dataPortability.description')}
+                    </p>
+
+                    {!isAdminOrOwner && (
+                        <div style={{ border: '1px solid #fde68a', backgroundColor: '#fffbeb', color: '#92400e', borderRadius: '8px', padding: '12px 14px', marginBottom: '20px', fontSize: '14px' }}>
+                            {t('settings.dataPortability.adminOnly')}
+                        </div>
+                    )}
+
+                    {dataError && (
+                        <div style={{ border: '1px solid #fecaca', backgroundColor: '#fef2f2', color: '#991b1b', borderRadius: '8px', padding: '12px 14px', marginBottom: '20px', fontSize: '14px' }}>
+                            {dataError}
+                        </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+                        <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
+                            <div style={{ fontWeight: 700, color: '#111827', marginBottom: '12px' }}>{t('settings.dataPortability.includeTitle')}</div>
+                            <div style={{ display: 'grid', gap: '8px', marginBottom: '14px' }}>
+                                {dataScopeOptions.map(scope => (
+                                    <label key={scope} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '10px', border: dataScopes.includes(scope) ? '1px solid #6366f1' : '1px solid #e5e7eb', backgroundColor: dataScopes.includes(scope) ? '#eef2ff' : '#fff', borderRadius: '8px', cursor: 'pointer' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={dataScopes.includes(scope)}
+                                            onChange={() => toggleDataScope(scope)}
+                                            disabled={!isAdminOrOwner || dataBusy}
+                                            style={{ marginTop: '3px' }}
+                                        />
+                                        <span>
+                                            <span style={{ display: 'block', fontWeight: 600, color: '#111827' }}>{getDataScopeLabel(scope)}</span>
+                                            <span style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginTop: '3px', lineHeight: 1.4 }}>{getDataScopeDescription(scope)}</span>
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                            <label style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '14px', color: '#374151', marginBottom: '16px' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={includeGlobalReferenceData}
+                                    onChange={(e) => setIncludeGlobalReferenceData(e.target.checked)}
+                                    disabled={!isAdminOrOwner || dataBusy}
+                                />
+                                {t('settings.dataPortability.includeGlobalReferences')}
+                            </label>
+                            <button
+                                onClick={handleDataExport}
+                                disabled={!isAdminOrOwner || dataBusy || dataScopes.length === 0}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px 16px',
+                                    backgroundColor: isAdminOrOwner && !dataBusy && dataScopes.length ? '#6366f1' : '#9ca3af',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    cursor: isAdminOrOwner && !dataBusy && dataScopes.length ? 'pointer' : 'not-allowed',
+                                    fontWeight: 600,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                }}
+                            >
+                                <Download size={16} />
+                                {dataBusy ? t('settings.dataPortability.processing') : t('settings.dataPortability.exportJson')}
+                            </button>
+                        </div>
+
+                        <div style={{ border: '1px solid #dbeafe', backgroundColor: '#eff6ff', borderRadius: '8px', padding: '16px' }}>
+                            <div style={{ fontWeight: 700, color: '#1e3a8a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Upload size={18} />
+                                {t('settings.dataPortability.inspectImport')}
+                            </div>
+                            <p style={{ color: '#1e40af', fontSize: '13px', margin: '0 0 14px', lineHeight: 1.5 }}>
+                                {t('settings.dataPortability.inspectDescription')}
+                            </p>
+                            <label style={{ display: 'block', color: '#1e3a8a', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>{t('settings.dataPortability.previewMode')}</label>
+                            <select
+                                value={dataImportMode}
+                                onChange={(e) => handleDataModeChange(e.target.value as 'replace' | 'merge')}
+                                disabled={!isAdminOrOwner || dataBusy}
+                                style={{ width: '100%', padding: '10px 12px', border: '1px solid #bfdbfe', borderRadius: '6px', marginBottom: '14px', backgroundColor: 'white' }}
+                            >
+                                <option value="replace">{t('settings.dataPortability.replaceMode')}</option>
+                                <option value="merge">{t('settings.dataPortability.mergeMode')}</option>
+                            </select>
+                            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 16px', border: '1px solid #93c5fd', color: '#1d4ed8', backgroundColor: 'white', borderRadius: '6px', cursor: isAdminOrOwner && !dataBusy ? 'pointer' : 'not-allowed', fontWeight: 700 }}>
+                                <FileCode2 size={16} />
+                                {t('settings.dataPortability.chooseJson')}
+                                <input
+                                    type="file"
+                                    accept="application/json,.json"
+                                    onChange={handleDataImportFile}
+                                    disabled={!isAdminOrOwner || dataBusy}
+                                    style={{ display: 'none' }}
+                                />
+                            </label>
+                        </div>
+                    </div>
+
+                    {(dataInspection || dataPreview) && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+                            {dataInspection && (
+                                <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
+                                    <div style={{ fontWeight: 700, marginBottom: '12px', color: '#111827' }}>{t('settings.dataPortability.fileDiagnostic')}</div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '8px 12px', fontSize: '13px' }}>
+                                        <span style={{ color: '#6b7280' }}>{t('settings.dataPortability.format')}</span>
+                                        <span style={{ fontFamily: 'monospace' }}>{dataInspection.format}</span>
+                                        <span style={{ color: '#6b7280' }}>{t('settings.dataPortability.schemaVersion')}</span>
+                                        <span>{dataInspection.schemaVersion ?? t('settings.dataPortability.unknown')}</span>
+                                        <span style={{ color: '#6b7280' }}>{t('settings.dataPortability.exportedAt')}</span>
+                                        <span>{dataInspection.exportedAt ? new Date(dataInspection.exportedAt).toLocaleString() : t('settings.dataPortability.unknown')}</span>
+                                        <span style={{ color: '#6b7280' }}>{t('settings.dataPortability.scopesLabel')}</span>
+                                        <span>{dataInspection.scopes.map(scope => getDataScopeLabel(scope)).join(', ') || t('common.none')}</span>
+                                        <span style={{ color: '#6b7280' }}>{t('settings.dataPortability.support')}</span>
+                                        <span style={{ color: dataInspection.supported ? '#16a34a' : '#dc2626', fontWeight: 700 }}>{dataInspection.supported ? t('settings.dataPortability.supported') : t('settings.dataPortability.unsupported')}</span>
+                                    </div>
+                                    {dataInspection.warnings.length > 0 && (
+                                        <div style={{ marginTop: '14px', display: 'grid', gap: '8px' }}>
+                                            {dataInspection.warnings.map((warning, index) => (
+                                                <div key={index} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', color: '#92400e', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 10px', fontSize: '13px' }}>
+                                                    <FileWarning size={15} style={{ marginTop: '1px', flexShrink: 0 }} />
+                                                    <span>{getDataWarningLabel(warning)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {dataPreview && (
+                                <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '12px' }}>
+                                        <div style={{ fontWeight: 700, color: '#111827' }}>{t('settings.dataPortability.importPreview')}</div>
+                                        <button
+                                            onClick={() => refreshDataPreview()}
+                                            disabled={!isAdminOrOwner || dataBusy}
+                                            style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: 'white', cursor: !isAdminOrOwner || dataBusy ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 700 }}
+                                        >
+                                            {t('common.refresh')}
+                                        </button>
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '8px' }}>
+                                        {dataPreview.summary.map(item => (
+                                            <div key={item.scope} style={{ border: '1px solid #f3f4f6', borderRadius: '6px', padding: '10px', backgroundColor: '#fafafa' }}>
+                                                <div style={{ fontWeight: 700, color: '#111827', marginBottom: '6px' }}>{getDataScopeLabel(item.scope)}</div>
+                                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                                    {Object.entries(item.counts).map(([key, value]) => (
+                                                        <span key={key} style={{ fontSize: '12px', color: '#374151', backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '999px', padding: '3px 8px' }}>{getDataCountLabel(key)}: {value}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div style={{ marginTop: '14px', border: dataPreview.canCommit ? '1px solid #bbf7d0' : '1px solid #fecaca', backgroundColor: dataPreview.canCommit ? '#f0fdf4' : '#fef2f2', color: dataPreview.canCommit ? '#166534' : '#991b1b', borderRadius: '6px', padding: '10px', fontSize: '13px', fontWeight: 700 }}>
+                                        {dataPreview.canCommit ? t('settings.dataPortability.previewValid') : t('settings.dataPortability.previewBlocked')}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {dataInspection?.fieldDifferences?.length ? (
+                        <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', marginBottom: '24px' }}>
+                            <div style={{ padding: '12px 16px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 700 }}>
+                                {t('settings.dataPortability.fieldDifferences')}
+                            </div>
+                            <div style={{ maxHeight: '280px', overflow: 'auto' }}>
+                                {dataInspection.fieldDifferences.map((difference, index) => (
+                                    <div key={`${difference.scope}-${difference.entity}-${difference.field}-${difference.kind}-${index}`} style={{ display: 'grid', gridTemplateColumns: '120px 150px 1fr 90px', gap: '10px', padding: '10px 16px', borderBottom: '1px solid #f3f4f6', fontSize: '13px', alignItems: 'center' }}>
+                                        <span style={{ color: '#6b7280' }}>{difference.scope}</span>
+                                        <span>{difference.entity}</span>
+                                        <code style={{ color: '#111827' }}>{difference.field}</code>
+                                        <span style={{ color: difference.severity === 'error' ? '#dc2626' : difference.severity === 'warning' ? '#92400e' : '#6b7280', fontWeight: 700 }}>{getDataDifferenceKindLabel(difference.kind)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
+
+                    <div style={{ border: '1px solid #c7d2fe', backgroundColor: '#eef2ff', borderRadius: '8px', padding: '16px', display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                        <div>
+                            <div style={{ fontWeight: 700, color: '#3730a3', marginBottom: '4px' }}>{t('settings.dataPortability.finalImport')}</div>
+                            <div style={{ color: '#4338ca', fontSize: '13px' }}>
+                                {dataPreview?.commitEndpointReady
+                                    ? t('settings.dataPortability.finalImportReady')
+                                    : t('settings.dataPortability.finalImportPending')}
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleDataCommit}
+                            disabled={!isAdminOrOwner || dataBusy || !dataImportPayload || !dataPreview?.canCommit || !dataPreview?.commitEndpointReady}
+                            style={{
+                                padding: '10px 16px',
+                                border: 'none',
+                                borderRadius: '6px',
+                                backgroundColor: isAdminOrOwner && !dataBusy && dataImportPayload && dataPreview?.canCommit && dataPreview?.commitEndpointReady ? '#4f46e5' : '#9ca3af',
+                                color: 'white',
+                                fontWeight: 700,
+                                cursor: isAdminOrOwner && !dataBusy && dataImportPayload && dataPreview?.canCommit && dataPreview?.commitEndpointReady ? 'pointer' : 'not-allowed',
+                            }}
+                        >
+                            {dataBusy ? t('settings.dataPortability.processing') : t('common.import')}
+                        </button>
+                    </div>
+
+                    {dataCommitResult && (
+                        <div style={{ border: '1px solid #bbf7d0', backgroundColor: '#f0fdf4', color: '#166534', borderRadius: '8px', padding: '14px 16px', marginTop: '20px' }}>
+                            <div style={{ fontWeight: 700, marginBottom: '8px' }}>{t('settings.dataPortability.importComplete')}</div>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                {Object.entries(dataCommitResult.stats).map(([key, value]) => (
+                                    <span key={key} style={{ fontSize: '12px', backgroundColor: 'white', border: '1px solid #bbf7d0', borderRadius: '999px', padding: '3px 8px' }}>
+                                        {getDataCountLabel(key)}: {value}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

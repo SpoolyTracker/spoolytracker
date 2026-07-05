@@ -631,6 +631,34 @@ export const api = {
         return res.json();
     },
 
+    async exportData(request: DataPortabilityExportRequest = {}): Promise<any> {
+        return apiFetch(`${BASE_URL}/data-portability/export`, {
+            method: 'POST',
+            body: JSON.stringify(request),
+        });
+    },
+
+    async inspectDataImport(payload: unknown): Promise<DataPortabilityInspection> {
+        return apiFetch(`${BASE_URL}/data-portability/import/inspect`, {
+            method: 'POST',
+            body: JSON.stringify({ payload }),
+        });
+    },
+
+    async previewDataImport(payload: unknown, options: { mode?: 'replace' | 'merge'; scopes?: DataPortabilityScope[] } = {}): Promise<DataPortabilityPreview> {
+        return apiFetch(`${BASE_URL}/data-portability/import/preview`, {
+            method: 'POST',
+            body: JSON.stringify({ payload, ...options }),
+        });
+    },
+
+    async commitDataImport(payload: unknown, options: { mode?: 'replace' | 'merge'; scopes?: DataPortabilityScope[] } = {}): Promise<DataPortabilityCommitResult> {
+        return apiFetch(`${BASE_URL}/data-portability/import/commit`, {
+            method: 'POST',
+            body: JSON.stringify({ payload, ...options }),
+        });
+    },
+
     // Notifications
     getNotifications: async () => {
         return apiFetch(`${BASE_URL}/notifications`);
@@ -1764,6 +1792,52 @@ export interface ReplenishmentResponse {
         color: string;
     };
     suggestions: ReplenishmentSuggestion[];
+}
+
+export type DataPortabilityScope =
+    | 'referenceData'
+    | 'inventory'
+    | 'consumption'
+    | 'projects'
+    | 'organizationSettings';
+
+export interface DataPortabilityExportRequest {
+    scopes?: DataPortabilityScope[];
+    includeGlobalReferenceData?: boolean;
+}
+
+export interface DataPortabilityFieldDifference {
+    scope: string;
+    entity: string;
+    field: string;
+    kind: 'unknown' | 'missing';
+    severity: 'info' | 'warning' | 'error';
+}
+
+export interface DataPortabilityInspection {
+    format: string;
+    supported: boolean;
+    schemaVersion: number | null;
+    exportedAt: string | null;
+    source: Record<string, any> | null;
+    scopes: DataPortabilityScope[];
+    fieldDifferences: DataPortabilityFieldDifference[];
+    warnings: string[];
+}
+
+export interface DataPortabilityPreview extends DataPortabilityInspection {
+    mode: 'replace' | 'merge';
+    selectedScopes: DataPortabilityScope[];
+    summary: Array<{ scope: DataPortabilityScope; counts: Record<string, number> }>;
+    canCommit: boolean;
+    commitEndpointReady: boolean;
+}
+
+export interface DataPortabilityCommitResult {
+    status: 'committed';
+    mode: 'replace' | 'merge';
+    scopes: DataPortabilityScope[];
+    stats: Record<string, number>;
 }
 
 const getAiUserId = (): string => {

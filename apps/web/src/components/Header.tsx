@@ -35,6 +35,7 @@ import { useNFCBridge } from '../hooks/useNFCBridge';
 import PrinterStatusMenu from './PrinterStatusMenu';
 import SupportModal from './SupportModal';
 import AiEngineStatus from './AiEngineStatus';
+import { OrganizationSwitcher } from './OrganizationSwitcher';
 
 interface HeaderProps {
     handleDrawerToggle: () => void;
@@ -129,6 +130,10 @@ export default function Header({ handleDrawerToggle }: HeaderProps) {
                 </IconButton>
 
                 <Box sx={{ flexGrow: 1 }} />
+
+                <Box sx={{ display: { xs: 'none', sm: 'block' }, mr: 1 }}>
+                    <OrganizationSwitcher variant="compact" />
+                </Box>
 
                 <AiEngineStatus />
 

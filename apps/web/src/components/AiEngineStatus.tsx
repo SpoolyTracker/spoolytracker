@@ -1,35 +1,44 @@
 import { useEffect, useState } from 'react';
 import { Bot, CloudOff, Crown, DatabaseZap } from 'lucide-react';
-import { Box, ButtonBase, Chip, Tooltip, Typography } from '@mui/material';
+import { Box, ButtonBase, Tooltip, Typography } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import { aiEngine, aiStatus, type AiEngineStatus as AiEngineStatusResponse, type AiTierStatus } from '../api';
 
 type StatusState = 'checking' | 'api' | 'mock' | 'down';
 
 const statusConfig = {
     checking: {
-        label: 'IA...',
-        tooltip: 'Verification du moteur IA en cours.',
+        labelKey: 'aiEngineStatus.status.checking',
+        labelFallback: 'AI...',
+        tooltipKey: 'aiEngineStatus.tooltip.checking',
+        tooltipFallback: 'Checking the AI engine.',
         color: '#64748b',
         background: 'rgba(100, 116, 139, 0.12)',
         icon: Bot,
     },
     api: {
-        label: 'IA API',
-        tooltip: 'Moteur IA connecte aux donnees reelles de votre organisation.',
+        labelKey: 'aiEngineStatus.status.api',
+        labelFallback: 'AI API',
+        tooltipKey: 'aiEngineStatus.tooltip.api',
+        tooltipFallback: 'AI engine connected to real organization data.',
         color: '#16a34a',
         background: 'rgba(22, 163, 74, 0.12)',
         icon: DatabaseZap,
     },
     mock: {
-        label: 'IA mock',
-        tooltip: 'Moteur IA actif, mais en mode demo/offline. Les donnees affichees peuvent etre mockees.',
+        labelKey: 'aiEngineStatus.status.mock',
+        labelFallback: 'AI mock',
+        tooltipKey: 'aiEngineStatus.tooltip.mock',
+        tooltipFallback: 'AI engine active in demo/offline mode. Displayed data may be mocked.',
         color: '#d97706',
         background: 'rgba(217, 119, 6, 0.14)',
         icon: Bot,
     },
     down: {
-        label: 'IA off',
-        tooltip: "Moteur IA indisponible pour le moment.",
+        labelKey: 'aiEngineStatus.status.down',
+        labelFallback: 'AI off',
+        tooltipKey: 'aiEngineStatus.tooltip.down',
+        tooltipFallback: 'AI engine is currently unavailable.',
         color: '#dc2626',
         background: 'rgba(220, 38, 38, 0.12)',
         icon: CloudOff,
@@ -43,6 +52,7 @@ const resolveState = (status: AiEngineStatusResponse | null): StatusState => {
 };
 
 export default function AiEngineStatus() {
+    const { t } = useTranslation();
     const [state, setState] = useState<StatusState>('checking');
     const [status, setStatus] = useState<AiEngineStatusResponse | null>(null);
     const [tier, setTier] = useState<AiTierStatus | null>(null);
@@ -73,27 +83,30 @@ export default function AiEngineStatus() {
     const config = statusConfig[state];
     const Icon = config.icon;
     const isPro = tier?.tier === 'pro';
-    const tierLabel = tier ? (isPro ? 'IA Pro' : 'IA Free') : null;
-    const tierColor = isPro ? '#7c3aed' : '#64748b';
-    const tierBackground = isPro ? 'rgba(124, 58, 237, 0.12)' : 'rgba(100, 116, 139, 0.12)';
+    const statusLabel = t(config.labelKey, config.labelFallback);
+    const tierLabel = tier
+        ? (isPro ? t('aiEngineStatus.tier.pro', 'Pro') : t('aiEngineStatus.tier.free', 'Free'))
+        : t('aiEngineStatus.tier.unknown', 'Plan?');
+    const badgeLabel = `${statusLabel} - ${tierLabel}`;
     const tooltip = [
-        status ? config.tooltip : config.tooltip,
-        status ? `Source: ${status.data_source}.` : null,
-        status?.api_base_url ? `API: ${status.api_base_url}.` : null,
-        status?.fallback_reason ? `Raison: ${status.fallback_reason}.` : null,
-        status ? `LLM: ${status.llm.provider}${status.llm.available ? ' actif' : ' inactif'}.` : null,
-        tier ? `Niveau IA: ${isPro ? 'Pro (intelligence persistante)' : 'Free (suggestions de base)'}.` : null,
+        t(config.tooltipKey, config.tooltipFallback),
+        status ? `${t('aiEngineStatus.detail.source', 'Source')}: ${status.data_source}.` : null,
+        status?.api_base_url ? `${t('aiEngineStatus.detail.api', 'API')}: ${status.api_base_url}.` : null,
+        status?.fallback_reason ? `${t('aiEngineStatus.detail.reason', 'Reason')}: ${status.fallback_reason}.` : null,
+        status ? `${t('aiEngineStatus.detail.llm', 'LLM')}: ${status.llm.provider} ${status.llm.available ? t('aiEngineStatus.detail.active', 'active') : t('aiEngineStatus.detail.inactive', 'inactive')}.` : null,
+        tier ? `${t('aiEngineStatus.detail.tier', 'AI tier')}: ${isPro ? t('aiEngineStatus.detail.proDescription', 'Pro persistent intelligence') : t('aiEngineStatus.detail.freeDescription', 'Free basic suggestions')}.` : null,
     ].filter(Boolean).join(' ');
 
     return (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mr: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
             <Tooltip title={tooltip}>
                 <ButtonBase
                     onClick={refresh}
                     sx={{
                         borderRadius: '999px',
-                        px: { xs: 0.75, md: 1.25 },
-                        py: 0.75,
+                        minHeight: 38,
+                        px: { xs: 0.85, md: 1.15 },
+                        py: 0.6,
                         gap: 0.75,
                         bgcolor: config.background,
                         color: config.color,
@@ -120,30 +133,14 @@ export default function AiEngineStatus() {
                     <Typography
                         variant="caption"
                         fontWeight={700}
-                        sx={{ display: { xs: 'none', md: 'block' }, lineHeight: 1 }}
+                        noWrap
+                        sx={{ display: { xs: 'none', md: 'block' }, lineHeight: 1, maxWidth: 132 }}
                     >
-                        {config.label}
+                        {badgeLabel}
                     </Typography>
+                    {isPro && <Crown size={14} />}
                 </ButtonBase>
             </Tooltip>
-            {tierLabel && (
-                <Tooltip title={tooltip}>
-                    <Chip
-                        icon={isPro ? <Crown size={13} /> : undefined}
-                        label={tierLabel}
-                        size="small"
-                        sx={{
-                            height: 24,
-                            fontWeight: 800,
-                            fontSize: '0.7rem',
-                            color: tierColor,
-                            bgcolor: tierBackground,
-                            border: `1px solid ${tierColor}33`,
-                            '& .MuiChip-icon': { color: tierColor },
-                        }}
-                    />
-                </Tooltip>
-            )}
         </Box>
     );
 }
