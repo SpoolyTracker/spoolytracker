@@ -99,7 +99,9 @@ export default function ConsumptionModal({
         const standalone: any[] = [];
         const fullSpools: Record<string, any[]> = {};
 
-        allFilaments.forEach(f => {
+        allFilaments
+            .filter(f => Number(f.weightRemaining || 0) > 0)
+            .forEach(f => {
             const isFull = f.weightRemaining >= f.weightInitial;
             if (isFull) {
                 const key = `${f.brandId}-${f.materialId}-${(f.types || []).map(t => t.id).sort().join(',')}-${f.color}`;
@@ -144,6 +146,7 @@ export default function ConsumptionModal({
 
     // Form State
     const [amount, setAmount] = useState<number | string>('');
+    const [failureProgressPercent, setFailureProgressPercent] = useState<number | string>('');
     const [type, setType] = useState<'PRINT' | 'MANUAL' | 'FAIL'>('PRINT');
     const [notes, setNotes] = useState('');
     const [date, setDate] = useState(getLocalDatetime());
@@ -151,13 +154,19 @@ export default function ConsumptionModal({
     const [submitting, setSubmitting] = useState(false);
     const [keepOpen, setKeepOpen] = useState(false);
     const [editLogId, setEditLogId] = useState<number | null>(null);
+    const isFailureMode = type === 'FAIL';
+    const computedFailureAmount = isFailureMode && amount !== '' && failureProgressPercent !== ''
+        ? Math.round(Number(amount) * (Number(failureProgressPercent) / 100) * 100) / 100
+        : null;
+    const previewAmount = computedFailureAmount !== null ? computedFailureAmount : Number(amount);
 
     const handleUpdate = onUpdate || onSuccess || (() => { });
 
     // Initialize from editLog prop if provided
     useEffect(() => {
         if (editLog) {
-            setAmount(Number(Number(editLog.amount).toFixed(2)));
+            setAmount(Number(Number(editLog.plannedPrintAmount ?? editLog.amount).toFixed(2)));
+            setFailureProgressPercent(editLog.failureProgressPercent != null ? Number(Number(editLog.failureProgressPercent).toFixed(2)) : '');
             setType(editLog.type);
             setNotes(editLog.notes || '');
             try {
@@ -182,6 +191,7 @@ export default function ConsumptionModal({
         if (!isOpen) {
             setSelectedFilament(null);
             setAmount('');
+            setFailureProgressPercent('');
             setType('PRINT');
             setNotes('');
             setDate(getLocalDatetime());
@@ -233,22 +243,33 @@ export default function ConsumptionModal({
     };
 
     const handleSubmit = async () => {
-        if (!isGroupMode && (!activeFilamentId || !amount || Number(amount) <= 0)) return;
-        if (isGroupMode && (!amount || Number(amount) <= 0)) return;
+        const progress = Number(failureProgressPercent);
+        if (isFailureMode && (failureProgressPercent === '' || !Number.isFinite(progress) || progress < 0 || progress > 100)) {
+            alert(t('consumption.invalidFailureProgress', 'La progression doit etre entre 0 et 100%.'));
+            return;
+        }
+        const amountToSave = computedFailureAmount !== null ? computedFailureAmount : Number(amount);
+        if (!isGroupMode && (!activeFilamentId || !amountToSave || Number(amountToSave) <= 0)) return;
+        if (computedFailureAmount !== null && (!Number.isFinite(computedFailureAmount) || computedFailureAmount <= 0)) return;
+        if (isGroupMode && (!amountToSave || Number(amountToSave) <= 0)) return;
 
         if (editLogId) {
             setSubmitting(true);
             try {
                 await api.updateConsumption(editLogId, {
-                    amount: Number(amount),
+                    amount: amountToSave,
                     type,
                     notes,
                     date: date ? new Date(date) : undefined,
-                    is_planned: isPlanned
+                    is_planned: isPlanned,
+                    printStatus: isFailureMode ? 'FAILED' : undefined,
+                    plannedPrintAmount: isFailureMode && amount !== '' ? Number(amount) : null,
+                    failureProgressPercent: isFailureMode && failureProgressPercent !== '' ? Number(failureProgressPercent) : null
                 });
 
                 const currentFilamentId = activeFilamentId;
                 setAmount('');
+                setFailureProgressPercent('');
                 setNotes('');
                 setDate(getLocalDatetime());
                 setEditLogId(null);
@@ -276,7 +297,7 @@ export default function ConsumptionModal({
         }
 
         // Check for insufficient stock (rollover logic)
-        if (activeWeight !== undefined && Number(amount) > activeWeight) {
+        if (activeWeight !== undefined && Number(amountToSave) > activeWeight) {
             // Find compatible filaments for rollover
             // We need to fetch all filaments if we haven't already
             let candidates = allFilaments;
@@ -306,7 +327,7 @@ export default function ConsumptionModal({
                     const confirmRollover = window.confirm(
                         t('inventory.rolloverConfirm', {
                             current: Math.round(activeWeight),
-                            requested: amount,
+                            requested: amountToSave,
                             nextSpool: `${getFilamentTitle(nextSpool)} (${Math.round(nextSpool.weightRemaining)}g)`
                         }) ||
                         `Insufficient stock (${Math.round(activeWeight)}g). Consume rest from next spool (${Math.round(nextSpool.weightRemaining)}g)?`
@@ -317,7 +338,7 @@ export default function ConsumptionModal({
                         try {
                             // 1. Deplete current spool
                             const remainingInCurrent = activeWeight;
-                            const overflow = Number(amount) - remainingInCurrent;
+                            const overflow = Number(amountToSave) - remainingInCurrent;
 
                             if (remainingInCurrent > 0 && activeFilamentId) {
                                 await api.logConsumption(activeFilamentId, remainingInCurrent, type, `${notes} (Rollover: Depleted)`, date ? new Date(date).toISOString() : undefined, undefined, isPlanned);
@@ -327,6 +348,7 @@ export default function ConsumptionModal({
                             await api.logConsumption(nextSpool.id, overflow, type, `${notes} (Rollover: Continued)`, date ? new Date(date).toISOString() : undefined, undefined, isPlanned);
 
                             setAmount('');
+                            setFailureProgressPercent('');
                             setNotes('');
                             setDate(getLocalDatetime());
                             handleUpdate();
@@ -363,19 +385,27 @@ export default function ConsumptionModal({
                     materialId: targetGroup.items[0]?.materialId || targetGroup.items[0]?.material?.id,
                     typeId: targetGroup.items[0]?.types?.[0]?.id, // Use first item's type as proxy
                     color: targetGroup.color,
-                    amount: Number(amount),
+                    amount: amountToSave,
                     type,
                     notes,
                     isPlanned,
-                    date: date ? new Date(date).toISOString() : undefined
+                    date: date ? new Date(date).toISOString() : undefined,
+                    printStatus: isFailureMode ? 'FAILED' : undefined,
+                    plannedPrintAmount: isFailureMode && amount !== '' ? Number(amount) : null,
+                    failureProgressPercent: isFailureMode && failureProgressPercent !== '' ? Number(failureProgressPercent) : null
                 });
             } else if (activeFilamentId) {
-                await api.logConsumption(activeFilamentId, Number(amount), type, notes, date ? new Date(date).toISOString() : undefined, undefined, isPlanned);
+                await api.logConsumption(activeFilamentId, amountToSave, type, notes, date ? new Date(date).toISOString() : undefined, undefined, isPlanned, {
+                    printStatus: isFailureMode ? 'FAILED' : undefined,
+                    plannedPrintAmount: isFailureMode && amount !== '' ? Number(amount) : null,
+                    failureProgressPercent: isFailureMode && failureProgressPercent !== '' ? Number(failureProgressPercent) : null
+                });
             }
             
             const currentFilamentId = activeFilamentId;
 
             setAmount('');
+            setFailureProgressPercent('');
             setNotes('');
             setDate(getLocalDatetime());
             handleUpdate();
@@ -410,7 +440,8 @@ export default function ConsumptionModal({
     };
 
     const handleDuplicate = (log: ConsumptionLog) => {
-        setAmount(log.amount);
+        setAmount(log.plannedPrintAmount != null ? Number(log.plannedPrintAmount) : log.amount);
+        setFailureProgressPercent(log.failureProgressPercent != null ? Number(log.failureProgressPercent) : '');
         setType(log.type);
         setNotes(log.notes || '');
         setIsPlanned(!!log.is_planned);
@@ -419,7 +450,8 @@ export default function ConsumptionModal({
     };
 
     const handleEdit = (log: ConsumptionLog) => {
-        setAmount(Number(log.amount.toFixed(2)));
+        setAmount(Number((log.plannedPrintAmount ?? log.amount).toFixed(2)));
+        setFailureProgressPercent(log.failureProgressPercent != null ? Number(log.failureProgressPercent.toFixed(2)) : '');
         setType(log.type);
         setNotes(log.notes || '');
         try {
@@ -580,7 +612,7 @@ export default function ConsumptionModal({
                                 />
                             </Box>
 
-                            {!isLocked && Number(amount) >= (activeWeight || 0) && (activeWeight || 0) > 0 && !isPlanned && (
+                            {!isLocked && previewAmount >= (activeWeight || 0) && (activeWeight || 0) > 0 && !isPlanned && (
                                 <Alert severity="warning" sx={{ alignItems: 'center' }}>
                                     <Typography variant="subtitle2">
                                         {t('consumption.emptyWarning', "⚠️ Cette quantité épuisera la bobine. Celle-ci sera considérée comme vide et disparaîtra du stock actif.")}
@@ -633,6 +665,27 @@ export default function ConsumptionModal({
                                         />
                                     ))}
                                 </Box>
+                                {isFailureMode && (
+                                    <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                                        <TextField
+                                            label={t('consumption.failureProgressPercent', 'Progression de l\'echec')}
+                                            type="text"
+                                            value={failureProgressPercent}
+                                            onChange={(e) => setFailureProgressPercent(normalizeNumericInput(e.target.value))}
+                                            fullWidth
+                                            InputProps={{
+                                                endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                                            }}
+                                        />
+                                        {computedFailureAmount !== null && Number.isFinite(computedFailureAmount) && (
+                                            <Alert severity="info" sx={{ alignItems: 'center' }}>
+                                                <Typography variant="subtitle2">
+                                                    {t('consumption.computedFailureAmount', 'Conso qui sera loggee')}: <strong>{computedFailureAmount}{unit}</strong>
+                                                </Typography>
+                                            </Alert>
+                                        )}
+                                    </Box>
+                                )}
                             </Box>
 
                             <TextField

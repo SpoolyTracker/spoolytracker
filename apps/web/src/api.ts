@@ -139,6 +139,10 @@ export interface ConsumptionLog {
     project?: Project;
     projectId?: number;
     is_planned?: boolean;
+    printTaskId?: string;
+    printStatus?: 'SUCCESS' | 'FAILED';
+    plannedPrintAmount?: number | null;
+    failureProgressPercent?: number | null;
 }
 
 export interface Filament {
@@ -941,11 +945,11 @@ export const api = {
         });
     },
 
-    async logConsumption(id: number, amount: number, type: 'MANUAL' | 'PRINT' | 'FAIL' = 'MANUAL', notes?: string, date?: string, externalJobId?: string, isPlanned: boolean = false): Promise<ConsumptionLog> {
+    async logConsumption(id: number, amount: number, type: 'MANUAL' | 'PRINT' | 'FAIL' = 'MANUAL', notes?: string, date?: string, externalJobId?: string, isPlanned: boolean = false, options: { printStatus?: 'SUCCESS' | 'FAILED'; plannedPrintAmount?: number | null; failureProgressPercent?: number | null } = {}): Promise<ConsumptionLog> {
         const res = await authAwareFetch(`${API_URL}/${id}/consumption`, {
             method: 'POST',
             headers: getHeaders(),
-            body: JSON.stringify({ amount, type, notes, date, externalJobId, isPlanned }),
+            body: JSON.stringify({ amount, type, notes, date, externalJobId, isPlanned, ...options }),
         });
         if (!res.ok) throw new Error('Failed to log consumption');
         return res.json();

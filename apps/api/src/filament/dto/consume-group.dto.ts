@@ -19,6 +19,16 @@ export class ConsumeGroupDto {
   amount: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  plannedPrintAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  failureProgressPercent?: number;
+
+  @IsOptional()
   @IsString()
   type?: 'MANUAL' | 'PRINT' | 'FAIL';
 
@@ -32,4 +42,8 @@ export class ConsumeGroupDto {
   @IsOptional()
   @IsString()
   date?: string;
+
+  @IsOptional()
+  @IsString()
+  printStatus?: 'SUCCESS' | 'FAILED';
 }

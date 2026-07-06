@@ -52,6 +52,19 @@ export interface TigerTagData {
   rawData?: any;
 }
 
+interface ConsumptionAmountInput {
+  amount?: number;
+  plannedPrintAmount?: number | null;
+  failureProgressPercent?: number | null;
+  printStatus?: PrintStatus;
+}
+
+const normalizeOptionalNumber = (value: unknown): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
 import { TigerMappingService } from '../tigertag/tiger-mapping.service';
 import { generateSpoolReference } from '../common/utils/reference';
 
@@ -672,6 +685,8 @@ export class FilamentService {
         'log.is_planned AS "isPlanned"',
         'log.printTaskId AS "printTaskId"',
         'log.printStatus AS "printStatus"',
+        'log.plannedPrintAmount AS "plannedPrintAmount"',
+        'log.failureProgressPercent AS "failureProgressPercent"',
       ])
       .orderBy('log.date', 'DESC')
       .getRawMany();
@@ -686,6 +701,15 @@ export class FilamentService {
       isPlanned: Boolean(row.isPlanned),
       printTaskId: row.printTaskId ?? null,
       printStatus: row.printStatus ?? null,
+      plannedPrintAmount:
+        row.plannedPrintAmount !== null && row.plannedPrintAmount !== undefined
+          ? Number(row.plannedPrintAmount)
+          : null,
+      failureProgressPercent:
+        row.failureProgressPercent !== null &&
+        row.failureProgressPercent !== undefined
+          ? Number(row.failureProgressPercent)
+          : null,
       filament: { id: Number(row.filamentId) },
     }));
   }
@@ -1086,9 +1110,52 @@ export class FilamentService {
     });
   }
 
+  private resolveConsumptionAmount(input: ConsumptionAmountInput) {
+    const plannedPrintAmount = normalizeOptionalNumber(
+      input.plannedPrintAmount,
+    );
+    const failureProgressPercent = normalizeOptionalNumber(
+      input.failureProgressPercent,
+    );
+
+    if (
+      input.printStatus === PrintStatus.FAILED &&
+      plannedPrintAmount !== undefined &&
+      failureProgressPercent !== undefined
+    ) {
+      if (plannedPrintAmount <= 0) {
+        throw new BadRequestException('plannedPrintAmount must be positive');
+      }
+      if (failureProgressPercent < 0 || failureProgressPercent > 100) {
+        throw new BadRequestException(
+          'failureProgressPercent must be between 0 and 100',
+        );
+      }
+
+      return {
+        amount:
+          Math.round(plannedPrintAmount * (failureProgressPercent / 100) * 100) /
+          100,
+        plannedPrintAmount,
+        failureProgressPercent,
+      };
+    }
+
+    const amount = normalizeOptionalNumber(input.amount);
+    if (amount === undefined || amount <= 0) {
+      throw new BadRequestException('amount must be positive');
+    }
+
+    return {
+      amount,
+      plannedPrintAmount: plannedPrintAmount ?? null,
+      failureProgressPercent: failureProgressPercent ?? null,
+    };
+  }
+
   async logConsumption(
     id: number,
-    amount: number,
+    amount: number | undefined,
     type: 'MANUAL' | 'PRINT' | 'FAIL' = 'MANUAL',
     notes?: string,
     organizationId?: number,
@@ -1099,6 +1166,8 @@ export class FilamentService {
     isPlanned: boolean = false,
     printTaskId?: string,
     printStatus?: PrintStatus,
+    plannedPrintAmount?: number | null,
+    failureProgressPercent?: number | null,
   ) {
     const filament = await this.findOne(id, organizationId);
 
@@ -1126,9 +1195,16 @@ export class FilamentService {
       );
     }
 
+    const resolved = this.resolveConsumptionAmount({
+      amount,
+      plannedPrintAmount,
+      failureProgressPercent,
+      printStatus,
+    });
+
     return this._performConsumption(
       filament,
-      amount,
+      resolved.amount,
       type as ConsumptionType,
       notes,
       date,
@@ -1138,6 +1214,8 @@ export class FilamentService {
       isPlanned,
       printTaskId,
       printStatus,
+      resolved.plannedPrintAmount,
+      resolved.failureProgressPercent,
     );
   }
 
@@ -1153,6 +1231,8 @@ export class FilamentService {
     isPlanned: boolean = false,
     printTaskId?: string,
     printStatus?: PrintStatus,
+    plannedPrintAmount?: number | null,
+    failureProgressPercent?: number | null,
   ) {
     if (externalJobId) {
       const existingLog = await this.consumptionRepository.findOne({
@@ -1186,6 +1266,12 @@ export class FilamentService {
     if (externalJobId) log.externalJobId = externalJobId;
     if (printTaskId) log.printTaskId = printTaskId;
     if (printStatus) log.printStatus = printStatus;
+    if (plannedPrintAmount !== undefined) {
+      log.plannedPrintAmount = plannedPrintAmount;
+    }
+    if (failureProgressPercent !== undefined) {
+      log.failureProgressPercent = failureProgressPercent;
+    }
 
     // Update weights
     if (isPlanned) {
@@ -1242,8 +1328,17 @@ export class FilamentService {
           notes,
           isPlanned = false,
           date,
+          printStatus,
+          plannedPrintAmount,
+          failureProgressPercent,
         } = dto;
         const consumptionDate = date ? new Date(date) : new Date();
+        const resolved = this.resolveConsumptionAmount({
+          amount,
+          plannedPrintAmount,
+          failureProgressPercent,
+          printStatus: printStatus as PrintStatus | undefined,
+        });
 
         // 1. Find all active filaments in this group
         // We use the transactional manager here
@@ -1291,9 +1386,9 @@ export class FilamentService {
           (sum, f) => sum + f.weightRemaining,
           0,
         );
-        if (amount > totalAvailable) {
+        if (resolved.amount > totalAvailable) {
           throw new BadRequestException(
-            `Insufficient stock. Total available: ${totalAvailable}g, requested: ${amount}g`,
+            `Insufficient stock. Total available: ${totalAvailable}g, requested: ${resolved.amount}g`,
           );
         }
 
@@ -1312,7 +1407,7 @@ export class FilamentService {
 
         const sortedQueue = [...started, ...full];
 
-        let remainingToConsume = amount;
+        let remainingToConsume = resolved.amount;
         const results = [];
 
         for (const filament of sortedQueue) {
@@ -1322,6 +1417,14 @@ export class FilamentService {
             filament.weightRemaining,
             remainingToConsume,
           );
+          const plannedPrintAmountForLog =
+            resolved.failureProgressPercent !== null &&
+            resolved.failureProgressPercent > 0
+              ? Math.round(
+                  (consumeFromThis / (resolved.failureProgressPercent / 100)) *
+                    100,
+                ) / 100
+              : resolved.plannedPrintAmount;
 
           // We must use a version of _performConsumption that uses the transaction!
           // Or better, let _performConsumption accept the manager.
@@ -1338,13 +1441,17 @@ export class FilamentService {
             userId,
             organizationId,
             isPlanned,
+            undefined,
+            printStatus as PrintStatus | undefined,
+            plannedPrintAmountForLog,
+            resolved.failureProgressPercent,
           );
           results.push(res);
           remainingToConsume -= consumeFromThis;
         }
 
         return {
-          consumed: amount - remainingToConsume,
+          consumed: resolved.amount - remainingToConsume,
           logs: results,
         };
       },
@@ -1364,6 +1471,8 @@ export class FilamentService {
     isPlanned: boolean = false,
     printTaskId?: string,
     printStatus?: PrintStatus,
+    plannedPrintAmount?: number | null,
+    failureProgressPercent?: number | null,
   ) {
     const log = new ConsumptionLog();
     log.filament = filament;
@@ -1375,6 +1484,12 @@ export class FilamentService {
     if (externalJobId) log.externalJobId = externalJobId;
     if (printTaskId) log.printTaskId = printTaskId;
     if (printStatus) log.printStatus = printStatus;
+    if (plannedPrintAmount !== undefined) {
+      log.plannedPrintAmount = plannedPrintAmount;
+    }
+    if (failureProgressPercent !== undefined) {
+      log.failureProgressPercent = failureProgressPercent;
+    }
 
     // Update weights
     if (isPlanned) {
@@ -2082,6 +2197,8 @@ export class FilamentService {
       is_planned?: boolean;
       printTaskId?: string;
       printStatus?: PrintStatus;
+      plannedPrintAmount?: number | null;
+      failureProgressPercent?: number | null;
     },
     organizationId?: number,
   ): Promise<ConsumptionLog> {
@@ -2122,7 +2239,23 @@ export class FilamentService {
       // 2. Apply NEW effect
       const newIsPlanned =
         data.is_planned !== undefined ? data.is_planned : log.is_planned;
-      const newAmount = data.amount !== undefined ? data.amount : log.amount;
+      const effectivePrintStatus =
+        data.printStatus !== undefined ? data.printStatus : log.printStatus;
+      const effectivePlannedPrintAmount =
+        data.plannedPrintAmount !== undefined
+          ? data.plannedPrintAmount
+          : log.plannedPrintAmount;
+      const effectiveFailureProgressPercent =
+        data.failureProgressPercent !== undefined
+          ? data.failureProgressPercent
+          : log.failureProgressPercent;
+      const resolved = this.resolveConsumptionAmount({
+        amount: data.amount !== undefined ? data.amount : log.amount,
+        plannedPrintAmount: effectivePlannedPrintAmount,
+        failureProgressPercent: effectiveFailureProgressPercent,
+        printStatus: effectivePrintStatus,
+      });
+      const newAmount = resolved.amount;
 
       if (newIsPlanned) {
         filament.plannedWeight += newAmount;
@@ -2180,7 +2313,29 @@ export class FilamentService {
     }
 
     // Update fields
-    if (data.amount !== undefined) log.amount = data.amount;
+    if (
+      data.amount !== undefined ||
+      data.plannedPrintAmount !== undefined ||
+      data.failureProgressPercent !== undefined ||
+      data.printStatus !== undefined
+    ) {
+      const resolved = this.resolveConsumptionAmount({
+        amount: data.amount !== undefined ? data.amount : log.amount,
+        plannedPrintAmount:
+          data.plannedPrintAmount !== undefined
+            ? data.plannedPrintAmount
+            : log.plannedPrintAmount,
+        failureProgressPercent:
+          data.failureProgressPercent !== undefined
+            ? data.failureProgressPercent
+            : log.failureProgressPercent,
+        printStatus:
+          data.printStatus !== undefined ? data.printStatus : log.printStatus,
+      });
+      log.amount = resolved.amount;
+      log.plannedPrintAmount = resolved.plannedPrintAmount;
+      log.failureProgressPercent = resolved.failureProgressPercent;
+    }
     if (data.notes !== undefined) log.notes = data.notes;
     if (data.date !== undefined) log.date = new Date(data.date);
     if (data.type !== undefined) log.type = data.type;

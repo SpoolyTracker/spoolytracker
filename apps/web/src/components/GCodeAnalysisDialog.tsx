@@ -174,11 +174,9 @@ export default function GCodeAnalysisDialog({
     const fetchFilaments = async () => {
         try {
             const data = await api.getAll();
-            // Keep every spool selectable for mapping. The matching engine and
-            // confirmation step can warn about empty/insufficient spools, but
-            // hiding them here prevents users from intentionally choosing the
-            // spool they are about to load or refill.
-            setFilaments((data || []).sort((a: Filament, b: Filament) => {
+            setFilaments((data || [])
+                .filter((f: Filament) => (f.weightRemaining || 0) > 0)
+                .sort((a: Filament, b: Filament) => {
                 const aUsable = (a.weightRemaining || 0) > 0 && !a.isLocked;
                 const bUsable = (b.weightRemaining || 0) > 0 && !b.isLocked;
                 if (aUsable !== bUsable) return aUsable ? -1 : 1;
