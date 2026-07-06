@@ -47,14 +47,23 @@ export class PublicConsumptionController {
       isPlanned?: boolean;
       printTaskId?: string;
       printStatus?: PrintStatus;
+      plannedPrintAmount?: number;
+      failureProgressPercent?: number;
     },
   ) {
     const filamentId = Number(body.filamentId);
-    const amount = Number(body.amount);
+    const amount =
+      body.amount === undefined || body.amount === null
+        ? undefined
+        : Number(body.amount);
     if (!Number.isInteger(filamentId) || filamentId <= 0) {
       throw new BadRequestException('filamentId is required');
     }
-    if (!Number.isFinite(amount)) {
+    if (
+      amount === undefined &&
+      (body.plannedPrintAmount === undefined ||
+        body.failureProgressPercent === undefined)
+    ) {
       throw new BadRequestException('amount is required');
     }
 
@@ -76,6 +85,8 @@ export class PublicConsumptionController {
       Boolean(body.isPlanned),
       body.printTaskId,
       body.printStatus,
+      body.plannedPrintAmount,
+      body.failureProgressPercent,
     );
 
     return { data: toPublicConsumptionLog(log) };

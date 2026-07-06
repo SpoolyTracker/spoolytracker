@@ -75,4 +75,10 @@ export class ConsumptionLog {
     nullable: true,
   })
   printStatus: PrintStatus;
+
+  @Column('float', { nullable: true })
+  plannedPrintAmount: number | null;
+
+  @Column('float', { nullable: true })
+  failureProgressPercent: number | null;
 }

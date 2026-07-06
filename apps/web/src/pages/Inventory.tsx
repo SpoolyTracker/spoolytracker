@@ -365,9 +365,9 @@ const InventoryRow = ({
                                 <Star size={20} fill={f.favorite ? 'currentColor' : 'none'} />
                             </IconButton>
                         </Tooltip>
-                        <Tooltip title={f.isLocked ? t('common.lockedQuota') : t('inventory.logConsumption')}>
+                        <Tooltip title={f.isLocked ? t('common.lockedQuota') : Number(f.weightRemaining || 0) <= 0 ? t('consumption.emptySpoolCannotConsume', 'Cette bobine est vide, impossible de saisir une consommation.') : t('inventory.logConsumption')}>
                             <span>
-                                <IconButton size="small" onClick={() => handleConsumption(f)} disabled={f.isLocked} sx={inlineSecondaryActionSx}>
+                                <IconButton size="small" onClick={() => handleConsumption(f)} disabled={f.isLocked || Number(f.weightRemaining || 0) <= 0} sx={inlineSecondaryActionSx}>
                                     <PencilRuler size={18} />
                                 </IconButton>
                             </span>
@@ -540,6 +540,14 @@ export default function InventoryPage() {
     const [organization, setOrganization] = useState<any>(null);
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
     const [bulkEditGroup, setBulkEditGroup] = useState<any>(null);
+
+    const openConsumptionForFilament = (filament: Filament) => {
+        if (Number(filament.weightRemaining || 0) <= 0) {
+            alert(t('consumption.emptySpoolCannotConsume', 'Cette bobine est vide, impossible de saisir une consommation.'));
+            return;
+        }
+        setConsumptionFilament(filament);
+    };
 
     const toggleGroupExpand = (subKey: string) => {
         setExpandedGroups(prev => ({ ...prev, [subKey]: !prev[subKey] }));
@@ -1427,6 +1435,7 @@ export default function InventoryPage() {
                                                                 e.stopPropagation();
                                                                 setConsumptionGroup(subGroup);
                                                             }}
+                                                            disabled={Number(subGroup.totalWeight || 0) <= 0}
                                                             sx={{ border: '1px solid', borderColor: 'primary.light', borderRadius: 2, px: 1 }}
                                                             title={t('inventory.consumeGroup')}
                                                         >
@@ -1499,7 +1508,7 @@ export default function InventoryPage() {
                                                             handleDelete={handleDelete}
                                                             handleClone={handleClone}
                                                             handleUnlock={handleUnlock}
-                                                            handleConsumption={(f) => setConsumptionFilament(f)}
+                                                            handleConsumption={openConsumptionForFilament}
                                                             handleMarkAsEmpty={handleMarkAsEmpty}
                                                             handleHistory={(f) => setHistoryFilament(f)}
                                                             handlePrintLabel={(f) => handlePrintLabel(f)}
@@ -1648,7 +1657,7 @@ export default function InventoryPage() {
                                                                     handleDelete={handleDelete}
                                                                     handleClone={handleClone}
                                                                     handleUnlock={handleUnlock}
-                                                                    handleConsumption={(f) => setConsumptionFilament(f)}
+                                                                    handleConsumption={openConsumptionForFilament}
                                                                     handleMarkAsEmpty={handleMarkAsEmpty}
                                                                     handleHistory={(f) => setHistoryFilament(f)}
                                                                     handlePrintLabel={(f) => handlePrintLabel(f)}
@@ -1879,8 +1888,8 @@ export default function InventoryPage() {
                                                                 <Star size={20} fill={f.favorite ? 'currentColor' : 'none'} />
                                                             </IconButton>
                                                         </Tooltip>
-                                                        <Tooltip title={f.isLocked ? t('common.lockedQuota') : t('inventory.logConsumption')}>
-                                                            <span><IconButton size="small" onClick={() => setConsumptionFilament(f)} disabled={f.isLocked} sx={secondaryActionSx}><PencilRuler size={18} /></IconButton></span>
+                                                        <Tooltip title={f.isLocked ? t('common.lockedQuota') : Number(f.weightRemaining || 0) <= 0 ? t('consumption.emptySpoolCannotConsume', 'Cette bobine est vide, impossible de saisir une consommation.') : t('inventory.logConsumption')}>
+                                                            <span><IconButton size="small" onClick={() => openConsumptionForFilament(f)} disabled={f.isLocked || Number(f.weightRemaining || 0) <= 0} sx={secondaryActionSx}><PencilRuler size={18} /></IconButton></span>
                                                         </Tooltip>
                                                         <Tooltip title={t('inventory.markAsEmpty', 'Marquer comme vide')}>
                                                             <span><IconButton size="small" onClick={() => handleMarkAsEmpty(f)} disabled={f.isLocked || f.weightRemaining <= 0} sx={secondaryActionSx}><Archive size={18} /></IconButton></span>
@@ -1924,7 +1933,7 @@ export default function InventoryPage() {
                     filaments={filteredFilaments}
                     onEdit={setEditingFilament}
                     onDelete={handleDelete}
-                    onLogConsumption={setConsumptionFilament}
+                    onLogConsumption={openConsumptionForFilament}
                     onClone={handleClone}
                     organization={organization}
                     selectionModel={selectionModel}
@@ -1943,7 +1952,7 @@ export default function InventoryPage() {
                     filaments={filteredFilaments}
                     organizationId={organization?.id}
                     onEdit={setEditingFilament}
-                    onLogConsumption={setConsumptionFilament}
+                    onLogConsumption={openConsumptionForFilament}
                     onRefresh={() => fetchData(true)}
                 />
             )}

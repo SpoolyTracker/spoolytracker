@@ -42,6 +42,8 @@ export function toPublicConsumptionLog(log: any) {
     isPlanned: log.is_planned,
     printTaskId: log.printTaskId,
     printStatus: log.printStatus,
+    plannedPrintAmount: log.plannedPrintAmount,
+    failureProgressPercent: log.failureProgressPercent,
     filament: log.filament ? toPublicFilament(log.filament) : null,
   };
 }

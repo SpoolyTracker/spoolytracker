@@ -430,6 +430,8 @@ export class FilamentController {
       is_planned?: boolean;
       printTaskId?: string;
       printStatus?: 'SUCCESS' | 'FAILED';
+      plannedPrintAmount?: number;
+      failureProgressPercent?: number;
     },
     @Req() req: any,
   ) {
@@ -448,6 +450,8 @@ export class FilamentController {
       planned,
       body.printTaskId,
       body.printStatus as any,
+      body.plannedPrintAmount,
+      body.failureProgressPercent,
     );
   }
 
@@ -476,12 +480,19 @@ export class FilamentController {
       type?: any;
       is_planned?: boolean;
       isPlanned?: boolean;
+      printTaskId?: string;
+      printStatus?: 'SUCCESS' | 'FAILED';
+      plannedPrintAmount?: number;
+      failureProgressPercent?: number;
     },
     @Req() req: any,
   ) {
-    const data = { ...body };
+    const data: any = { ...body };
     if (data.isPlanned !== undefined && data.is_planned === undefined) {
       data.is_planned = data.isPlanned;
+    }
+    if (data.printStatus !== undefined) {
+      data.printStatus = data.printStatus as any;
     }
     return this.filamentService.updateConsumptionLog(
       +id,
